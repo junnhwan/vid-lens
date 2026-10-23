@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -300,7 +301,7 @@ func TestArticleLoopT15BlockingAndIncompleteReviewDoNotPublish(t *testing.T) {
 			})
 			err := s.engine.Run(context.Background(), s.claim, s.profile)
 			var problem *domain.Problem
-			if !errors.As(err, &problem) || (problem.Code != "ARTICLE_NO_PROGRESS" && problem.Code != "ARTICLE_BUDGET_EXHAUSTED") {
+			if !errors.As(err, &problem) || !slices.Contains([]string{"ARTICLE_NO_PROGRESS", "ARTICLE_BUDGET_EXHAUSTED", "ARTICLE_REVIEW_PROTOCOL_FAILED", "ARTICLE_REPAIR_LIMIT"}, problem.Code) {
 				t.Fatalf("unexpected termination %v", err)
 			}
 			assertNoLoopPublication(t, s)

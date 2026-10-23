@@ -10,14 +10,16 @@ import (
 )
 
 const ArticleLoopPolicy = "article-ac01-10-lc01-12-v1"
+const ArticleConvergenceReviewV1 = "scoped-convergence-2026-10-23-v1"
 
 // These identities are owned by the program, never accepted from author tools.
 type ArticleReviewScope struct {
-	ID         string   `json:"id"`
-	SectionIDs []string `json:"section_ids"`
-	SourceIDs  []string `json:"source_ids"`
-	FrameIDs   []string `json:"frame_ids"`
-	Global     bool     `json:"global"`
+	ID               string   `json:"id"`
+	SectionIDs       []string `json:"section_ids"`
+	SourceIDs        []string `json:"source_ids"`
+	ContextSourceIDs []string `json:"context_source_ids,omitempty"`
+	FrameIDs         []string `json:"frame_ids"`
+	Global           bool     `json:"global"`
 }
 type ArticleReviewIssue struct {
 	Severity    string   `json:"severity" jsonschema:"enum=blocking,enum=advisory"`
@@ -72,6 +74,8 @@ type ArticleReviewRecord struct {
 	Scope               ArticleReviewScope         `json:"scope"`
 	Report              ArticleReviewReport        `json:"report"`
 	VisualObservations  []ArticleVisualObservation `json:"visual_observations,omitempty"`
+	MaterialHash        string                     `json:"material_hash,omitempty"`
+	ReusedFrom          string                     `json:"reused_from,omitempty"`
 }
 type ArticleApproval struct {
 	CandidateHash       string   `json:"candidate_hash"`
@@ -102,6 +106,75 @@ func ArticlePolicyIdentityForContract(spec GenerationSpec, contract string) stri
 		Policy string
 		Spec   GenerationSpec
 	}{policy, spec})
+}
+
+// 新运行冻结复核修订；既有检查点的空修订继续使用原策略身份。
+func ArticleReviewPolicyIdentity(spec GenerationSpec, contract, revision string) string {
+	base := ArticlePolicyIdentityForContract(spec, contract)
+	if revision == "" {
+		return base
+	}
+	return ContentHash([]string{base, revision})
+}
+
+// 局部材料包含完整章节、实际引用绑定、相关局限及全篇结构导航。
+// 相同材料只能复用局部结论，全文批准和跨章核对始终属于当前候选。
+func ArticleReviewMaterialIdentity(a Article, scope ArticleReviewScope, snap Snapshot, text []Segment, assets []Asset) string {
+	projected := a
+	projected.Sections, projected.Limitations = nil, nil
+	projected.Citations = map[string]Citation{}
+	structure := [][2]string{}
+	for _, section := range a.Sections {
+		structure = append(structure, [2]string{section.ID, section.Title})
+		if slices.Contains(scope.SectionIDs, section.ID) {
+			projected.Sections = append(projected.Sections, section)
+		}
+	}
+	for _, limitation := range a.Limitations {
+		if len(limitation.SectionIDs) == 0 || slices.ContainsFunc(limitation.SectionIDs, func(id string) bool { return slices.Contains(scope.SectionIDs, id) }) {
+			projected.Limitations = append(projected.Limitations, limitation)
+		}
+	}
+	reading := ReadingArticle(projected)
+	used := map[string]bool{}
+	for _, section := range reading.Sections {
+		for _, block := range section.Blocks {
+			for _, id := range block.CitationIDs {
+				used[id] = true
+			}
+			for _, item := range block.Items {
+				for _, id := range item.CitationIDs {
+					used[id] = true
+				}
+			}
+			for _, row := range block.Rows {
+				for _, id := range row.CitationIDs {
+					used[id] = true
+				}
+			}
+		}
+	}
+	for _, limitation := range projected.Limitations {
+		for _, id := range limitation.CitationIDs {
+			used[id] = true
+		}
+	}
+	for id := range used {
+		projected.Citations[id] = a.Citations[id]
+	}
+	frames := []Asset{}
+	for _, asset := range assets {
+		if slices.Contains(scope.FrameIDs, asset.ID) {
+			frames = append(frames, asset)
+		}
+	}
+	return ContentHash(struct {
+		Article, Evidence string
+		Scope             ArticleReviewScope
+		Structure         [][2]string
+	}{
+		ArticleHash(projected), ArticleEvidenceIdentity(snap, text, frames), scope, structure,
+	})
 }
 
 // ValidateArticleVisualObservations checks coverage and evidence identities.

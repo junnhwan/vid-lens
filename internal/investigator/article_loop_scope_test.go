@@ -32,6 +32,8 @@ func TestArticleLoopReviewSplitNarrowsChaptersAndRetainsLearnedWorkSize(t *testi
 	}
 	s = reloadLoopSession(t, s)
 	l := s.cp.ArticleLoop
+	// 保留既有空修订检查点按原文数量学习范围的兼容行为。
+	l.ReviewRevision = ""
 	whole := l.Scopes[0]
 	hash, calls := l.CandidateHash, s.cp.Calls
 	if err := s.recoverLoopFailure(ctx, articleLoopCall{Mode: "review", Scope: &whole}, &domain.WorkError{Code: "MODEL_RESPONSE_BUDGET_EXHAUSTED"}); err != nil {

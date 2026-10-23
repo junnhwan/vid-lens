@@ -255,6 +255,11 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			return nil, err
 		}
 	} else {
+		if s.loopConvergence() {
+			if err := add(utils.InferEnhancedTool(loopPatchTool, "优先用本工具修正已有正文：按真实block_id替换或删除少量完整语义块，或更新指定章的局限。未改正文和引用由程序保留；全部意图在同一版本下原子保存。finish=true请求核验新稿。不能自行关闭blocking。", func(context.Context, loopPatchInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
+				return nil, err
+			}
+		}
 		if err := add(utils.InferEnhancedTool(loopSaveTool, "创建或替换独立章节，无需先提交提纲。每个content对象仅一个text/quote/list/code/table/figure/background构造；事实就近sources，列表每项和表格每行有sources；图片有visible_facts和uncertainty。合法章节局部接纳，回执有最新版本与创建身份。", func(context.Context, loopSaveInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
 			return nil, err
 		}
@@ -303,7 +308,7 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			if err = json.Unmarshal(domain.JSON(sc), &root); err != nil {
 				return nil, err
 			}
-			if info.Name == loopSaveTool {
+			if info.Name == loopSaveTool || info.Name == loopPatchTool {
 				loopLimitationSchema(root)
 				if v2 {
 					loopSemanticSchema(root)
@@ -318,6 +323,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 				if info.Name == loopSaveTool {
 					if order, ok := props["order"].(map[string]any); ok {
 						order["description"] = "All retained stable section IDs exactly once after this action, including unchanged chapters. May combine with replacements/deletions atomically. For new chapters use a separate later reorder after receiving stable IDs."
+						if s.loopConvergence() {
+							order["description"] = "Every retained chapter exactly once: use existing stable IDs, or the exact creation key from this same action for a newly created chapter. The program resolves creation keys atomically; never invent stable IDs."
+						}
 					}
 				}
 				props["activity_title"] = map[string]any{"type": "string", "maxLength": 60, "description": "面向用户的本次具体动作小标题，放在第一个字段；点明正在处理的主题、章节或画面，不宣称保存成功或核验通过。"}
@@ -496,7 +504,7 @@ func loopCanonicalSection(in loopSection, id string, catalog map[string]domain.C
 			}
 		}
 		if count != 1 {
-			return fail(fmt.Sprintf("/content/%d: exactly one semantic constructor required", i))
+			return fail(fmt.Sprintf("/content/%d: exactly one semantic constructor required; text/quote/list/code/table/figure/background are mutually exclusive, place an introduction and a figure in separate content objects", i))
 		}
 		b := domain.Block{ID: fmt.Sprintf("%s_b%d", id, i+1), Origin: "video", CitationIDs: append([]string{}, c.Sources...)}
 		switch {
@@ -820,6 +828,14 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		}
 		next := []domain.Section{}
 		for _, id := range order {
+			if s.loopConvergence() {
+				if created := receipt.Created[id]; created != "" {
+					if _, ambiguous := available[id]; ambiguous {
+						return map[string]any{"error": "ambiguous creation key in order", "id": id}, false, nil
+					}
+					id = created
+				}
+			}
 			sec, ok := available[id]
 			if !ok {
 				return map[string]any{"error": "duplicate/unknown reorder identity"}, false, nil

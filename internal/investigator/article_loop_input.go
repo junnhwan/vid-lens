@@ -112,6 +112,14 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 	if l.CandidateHash != "" && len(l.Scopes) > 0 {
 		mode = "review"
 	}
+	if s.loopConvergence() {
+		if mode == "author" && len(l.Issues) > 0 && (l.RepairRounds >= loopRepairRoundLimit || l.RepairActions >= loopRepairActionLimit) {
+			return nil, nil, nil, loopStop("ARTICLE_REPAIR_LIMIT", "阻断问题未在冻结的三轮核验、每轮三次修订行动内解决，不再重复修稿")
+		}
+		if mode == "review" && l.Failures["review_protocol:"+l.Scopes[0].ID] >= loopReviewProtocolLimit {
+			return nil, nil, nil, loopStop("ARTICLE_REVIEW_PROTOCOL_FAILED", "同一核验范围两次未返回有效报告，不再重复审核")
+		}
+	}
 	infos, err := s.loopTools(mode == "review")
 	if err != nil {
 		return nil, nil, nil, err
@@ -119,9 +127,19 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 	p := &articleLoopCall{Slot: s.cp.Calls, Mode: mode, OutputTokens: l.OutputTokens}
 	if mode == "review" {
 		scope := l.Scopes[0]
+		_, draft, e := s.loadLoopDraft(ctx)
+		if e != nil {
+			return nil, nil, nil, e
+		}
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && !(scope.Global && len(scope.SourceIDs) == 0) {
+			scope = loopScopeEvidence(scope, draft.Article)
+			if s.loopConvergence() {
+				scope = s.loopScopeContext(draft.Article, scope)
+			}
+		}
 		p.Scope = &scope
 		for i, t := range s.transcript {
-			if slices.Contains(scope.SourceIDs, t.ID) {
+			if slices.Contains(scope.SourceIDs, t.ID) || slices.Contains(scope.ContextSourceIDs, t.ID) {
 				p.Sources = append(p.Sources, fmt.Sprint("t", i+1))
 			}
 		}
@@ -144,6 +162,13 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 			return nil, nil, nil, e
 		}
 		l.ReviewReserve = max(1, len(planned))
+		if s.loopConvergence() {
+			count, e := s.loopPendingReviewCount(ctx, draft.Article, planned)
+			if e != nil {
+				return nil, nil, nil, e
+			}
+			l.ReviewReserve = max(1, count)
+		}
 		if s.cp.Calls+1+l.ReviewReserve > l.Budget.Calls {
 			return nil, nil, nil, loopStop("ARTICLE_BUDGET_EXHAUSTED", "剩余调用需要保留给当前规模候选的完整独立核验")
 		}
@@ -236,6 +261,18 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	if err != nil {
 		return nil, err
 	}
+	if p.Mode == "review" && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && !(p.Scope.Global && len(p.Scope.SourceIDs) == 0) {
+		scope := loopScopeEvidence(*p.Scope, d.Article)
+		if s.loopConvergence() {
+			scope = s.loopScopeContext(d.Article, scope)
+		}
+		p.Scope = &scope
+		for i, original := range s.transcript {
+			if slices.Contains(scope.ContextSourceIDs, original.ID) {
+				p.Sources = appendUnique(p.Sources, fmt.Sprint("t", i+1))
+			}
+		}
+	}
 	payload := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "detail_level": s.spec.DetailLevel, "purpose": s.spec.Purpose, "effective_limits": l.Budget, "calls_reserved": s.cp.Calls, "max_sections_this_action": l.OutputSections, "draft_version": saved.Version, "originals": s.loopOriginals(p.Sources)}
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		payload["originals"] = readingOriginals(s.transcript, append([]string{}, p.Sources...))
@@ -261,6 +298,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		system = strings.Replace(system, "、纯音乐/风景/剪辑或没有可用解释配图时", "或来源没有可用讲解内容时", 1)
 		system += "\n" + loopRevisionInstructions
 	}
+	if s.loopConvergence() && p.Mode == "author" {
+		system += "\n修正已有段落优先使用revise_blocks：replacements每项提供canonical_locations中的真实block_id及完整content对象（只选一个语义构造并保留实际sources）；remove_block_ids只删除明确冗余块；section_limitations按真实section_id更新该章完整局限，[]表示删除过时局限。未改正文由程序保留，不必重发整章。一次修正全部具体阻断，finish=true请求核验；保存新措辞不会重置修订额度。新增章节仍用save_sections，其order可以直接使用同一行动中的新建key，程序原子解析，勿编造稳定ID。"
+	}
 	if p.Mode == "review" {
 		system = loopReviewInstructions
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
@@ -268,12 +308,34 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			system += "\n每条issues必须显式填写severity字段，值只能是blocking或advisory；不能只写ac而省略severity。视觉问题的evidence_ids优先使用delivered_pixels里的完整id（与visual_observations.frame_id一致）；候选配图引用已绑定相同的不可变图片ID，不按文章出现顺序重新编号。"
 		}
 		payload["scope"] = p.Scope
+		if s.loopConvergence() {
+			headings := []map[string]string{}
+			for _, section := range d.Article.Sections {
+				headings = append(headings, map[string]string{"section_id": section.ID, "title": section.Title})
+			}
+			payload["all_section_ids_navigation_only"] = headings
+			system += "\n本轮只检查所分配章节与原文的实质正确性、必要覆盖和引用。补充上下文用于理解，不能因其它范围未交付就断言全片没有该事实。主张存在矛盾时指出原文反证；只有引用不足时报告AC04引用不匹配，不能把它升级为全片虚构。寒暄、次要例子、同义改写不作主要遗漏。讲者已清楚归因的观点不要求额外免责声明或外部证明。完成这些义务即提交最终报告，不反复重审已确认的条目，不输出推理过程。"
+		}
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 			scope := *p.Scope
 			scope.SourceIDs = append([]string{}, p.Sources...)
+			scope.ContextSourceIDs = nil
+			for i, original := range s.transcript {
+				if slices.Contains(p.Scope.ContextSourceIDs, original.ID) {
+					scope.ContextSourceIDs = append(scope.ContextSourceIDs, fmt.Sprint("t", i+1))
+				}
+			}
 			payload["scope"] = scope
 			if !scope.Global {
+				coverage := []string{}
+				for i, original := range s.transcript {
+					if slices.Contains(p.Scope.SourceIDs, original.ID) {
+						coverage = append(coverage, fmt.Sprint("t", i+1))
+					}
+				}
+				payload["coverage_source_ids"] = coverage
 				payload["scope_instruction"] = "This is one part of a complete review. Assess all required topics supported by the originals actually delivered in scope.source_ids. The full candidate provides matching and cross-reference context, not additional originals. topics[].source_ids and issues[].evidence_ids may cite only delivered originals/pixels. Do not add a topic listing the other, undelivered ranges or mark those ranges unassessed: they remain assigned to separate pending scopes. Disclose genuinely unassessed obligations within THIS scope. The program requires every pending scope and the final global check before publication."
+				payload["scope_instruction"] = payload["scope_instruction"].(string) + " coverage_source_ids defines the topic-coverage obligation; additional originals close citations from the complete delivered chapters and are context, not additional omission obligations. Missing evidence in another source range is not proof a statement is absent from the video. Distinguish a citation mismatch (AC04) from an actual contradiction (AC03)."
 			}
 		}
 		payload["execution_feedback"] = l.Feedback
@@ -302,7 +364,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 				headings = append(headings, map[string]any{"section_id": sec.ID, "title": sec.Title})
 			}
 			payload["candidate_structure"] = headings
-			a.Sections = nil
+			if !s.loopConvergence() {
+				a.Sections = nil
+			}
 			if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 				// These assertions were assigned to the source scopes above. The
 				// final pass checks relations using their completed maps, not facts
@@ -321,7 +385,16 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 				}
 				records = append(records, r)
 			}
-			payload["completed_scope_maps"] = records
+			if s.loopConvergence() {
+				maps := []any{}
+				for _, record := range records {
+					maps = append(maps, map[string]any{"section_ids": record.Scope.SectionIDs, "topics": record.Report.Topics})
+				}
+				payload["completed_scope_maps"] = maps
+				payload["scope_instruction"] = "Final relations check of the COMPLETE current reading view: title, chapter organization, repeated or contradictory statements, dangling references, and the union of independently assessed major topics. Local factual and pixel checks are already complete. Do not repeat them or invent new factual findings without originals. Return topics with source_ids=[] and exact current section IDs. Structural AC06 issues may locate actual candidate block IDs; facts need original evidence. This check is mandatory for every changed candidate."
+			} else {
+				payload["completed_scope_maps"] = records
+			}
 		}
 		payload["candidate"] = a
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
@@ -335,6 +408,18 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	} else {
 		payload["feedback"] = l.Feedback
 		payload["blocking_issues"] = l.Issues
+		if s.loopConvergence() {
+			payload["repair_budget"] = map[string]any{"remaining_rounds": max(0, loopRepairRoundLimit-l.RepairRounds), "remaining_actions_this_round": max(0, loopRepairActionLimit-l.RepairActions), "instruction": "Prefer revise_blocks for existing blocks and scoped limitations. Correct all listed concrete defects together; preserve unrelated material. Saved wording alone does not reset the repair budget."}
+			var feedback map[string]any
+			if json.Unmarshal(l.Feedback, &feedback) == nil {
+				if raw, ok := feedback["previous_arguments"].(string); ok && len(raw) > 8192 {
+					delete(feedback, "previous_arguments")
+					feedback["previous_arguments_omitted_bytes"] = len(raw)
+				}
+				delete(feedback, "issues")
+				payload["feedback"] = feedback
+			}
+		}
 		// For long drafts provide the sections touching this evidence range plus
 		// every heading. A targeted evidence read brings its related chapter back.
 		a := d.Article
@@ -587,6 +672,9 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 	// a smaller work size. Later revisions reuse that size, never old approvals.
 	l := s.cp.ArticleLoop
 	l.Scopes = []domain.ArticleReviewScope{scope}
+	if s.loopConvergence() {
+		l.Scopes = s.convergentLoopScopes(a)
+	}
 	for i := 0; i < len(l.Scopes); i++ {
 		task := l.Scopes[i]
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && l.ReviewSourceLimit > 0 && len(task.SourceIDs) > l.ReviewSourceLimit {
@@ -598,7 +686,7 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 		}
 		p := articleLoopCall{Mode: "review", Scope: &task, Frames: task.FrameIDs, OutputTokens: l.OutputTokens}
 		for j, t := range s.transcript {
-			if slices.Contains(task.SourceIDs, t.ID) {
+			if slices.Contains(task.SourceIDs, t.ID) || slices.Contains(task.ContextSourceIDs, t.ID) {
 				p.Sources = append(p.Sources, fmt.Sprint("t", j+1))
 			}
 		}
@@ -626,7 +714,7 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 			}
 			i--
 		}
-		if len(l.Scopes) > l.Budget.Calls-s.cp.Calls {
+		if !s.loopConvergence() && len(l.Scopes) > l.Budget.Calls-s.cp.Calls {
 			return nil, loopStop("ARTICLE_BUDGET_EXHAUSTED", "来源与稿件需要的核验范围超过剩余预算")
 		}
 	}
@@ -644,6 +732,12 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	scope := l.Scopes[index]
 	left, right := scope, scope
 	switch {
+	case s.loopConvergence() && len(scope.SectionIDs) > 1:
+		_, draft, err := s.loadLoopDraft(ctx)
+		if err != nil {
+			return err
+		}
+		left, right = s.loopChapterHalves(draft.Article, scope)
 	case len(scope.SourceIDs) > 1:
 		mid := len(scope.SourceIDs) / 2
 		left.SourceIDs = append([]string{}, scope.SourceIDs[:mid]...)
@@ -676,10 +770,28 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	}
 	left.Global = false
 	right.Global = false
+	if s.loopConvergence() {
+		_, draft, err := s.loadLoopDraft(ctx)
+		if err != nil {
+			return err
+		}
+		left = s.loopScopeContext(draft.Article, left)
+		right = s.loopScopeContext(draft.Article, right)
+	}
 	left.ID = ""
 	right.ID = ""
 	left.ID = store.Hash(left)[:24]
 	right.ID = store.Hash(right)[:24]
+	if s.loopConvergence() {
+		_, draft, err := s.loadLoopDraft(ctx)
+		if err != nil {
+			return err
+		}
+		before := s.loopScopeWork(draft.Article, scope)
+		if s.loopScopeWork(draft.Article, left) >= before || s.loopScopeWork(draft.Article, right) >= before {
+			return loopStop("ARTICLE_CAPACITY_EXCEEDED", "完整章节及其必需证据已无法有效缩小，不再重试相同核验工作量")
+		}
+	}
 	next := append([]domain.ArticleReviewScope{}, l.Scopes[:index]...)
 	next = append(next, left, right)
 	next = append(next, l.Scopes[index+1:]...)
@@ -704,7 +816,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 	}
 	sources := map[string]bool{}
 	for i, t := range text {
-		if slices.Contains(scope.SourceIDs, t.ID) {
+		if slices.Contains(scope.SourceIDs, t.ID) || slices.Contains(scope.ContextSourceIDs, t.ID) {
 			sources[fmt.Sprint("t", i+1)] = true
 			sources[t.ID] = true
 		}
@@ -718,7 +830,8 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 			return errors.New("issue needs AC, location, concrete problem and correction")
 		}
 		if issue.Severity == "blocking" {
-			if len(issue.EvidenceIDs) == 0 {
+			structural := scope.Global && len(scope.SourceIDs) == 0 && issue.AC == "AC06" && loopKnownLocation(a, issue.Location)
+			if len(issue.EvidenceIDs) == 0 && !structural {
 				return errors.New("blocking issue needs actual evidence")
 			}
 			for _, id := range issue.EvidenceIDs {
@@ -752,6 +865,23 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 		}
 	}
 	return nil
+}
+
+func loopKnownLocation(a domain.Article, location string) bool {
+	parts := strings.FieldsFunc(location, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+	})
+	for _, section := range a.Sections {
+		if slices.Contains(parts, section.ID) {
+			return true
+		}
+		for _, block := range section.Blocks {
+			if slices.Contains(parts, block.ID) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // A known candidate identity denotes a location, never original evidence.
@@ -914,6 +1044,9 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	}
 	if err != nil {
 		l.Feedback = loopReviewFailureFeedback(err, raw)
+		if s.loopConvergence() {
+			l.Failures["review_protocol:"+scope.ID]++
+		}
 		return false, nil
 	}
 	fingerprint, e := s.loopEvidenceFingerprint(ctx, d.Article)
@@ -924,15 +1057,33 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		return false, loopStop("ARTICLE_EVIDENCE_CHANGED", "核验中的证据已变化")
 	}
 	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations}
+	if s.loopConvergence() {
+		record.MaterialHash, e = s.loopMaterialHash(ctx, d.Article, scope)
+		if e != nil {
+			return false, e
+		}
+	}
 	key := "article-loop:review:" + store.Hash(map[string]any{"candidate": l.CandidateHash, "evidence": fingerprint, "scope": scope.ID})
 	if e = s.loopSave(ctx, key, "article_loop_review", record); e != nil {
 		return false, e
 	}
 	l.ReviewKeys = appendUnique(l.ReviewKeys, key)
+	l.Feedback = nil
+	if s.loopConvergence() && !scope.Global && !loopBlocking(report.Issues) {
+		if l.ReviewCache == nil {
+			l.ReviewCache = map[string]string{}
+		}
+		l.ReviewCache[record.MaterialHash] = key
+	}
 	l.Issues = append(l.Issues, report.Issues...)
 	l.Scopes = slices.DeleteFunc(l.Scopes, func(v domain.ArticleReviewScope) bool { return v.ID == scope.ID })
 	if len(l.Scopes) > 0 {
-		return true, nil
+		if s.loopConvergence() && loopBlocking(l.Issues) && len(l.Scopes) == 1 && l.Scopes[0].Global && len(l.Scopes[0].SourceIDs) == 0 {
+			// 先修正已经确认的问题，避免给明知有缺陷的稿件额外做全文关系核对。
+			l.Scopes = nil
+		} else {
+			return true, nil
+		}
 	}
 	blocking := []domain.ArticleReviewIssue{}
 	for _, issue := range l.Issues {
@@ -941,6 +1092,10 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		}
 	}
 	if len(blocking) > 0 {
+		if s.loopConvergence() {
+			l.RepairRounds++
+			l.RepairActions = 0
+		}
 		if l.BlockedCandidates == nil {
 			l.BlockedCandidates = map[string][]domain.ArticleReviewIssue{}
 		}

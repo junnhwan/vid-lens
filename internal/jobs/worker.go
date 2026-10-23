@@ -343,7 +343,7 @@ func classify(e error) (domain.Failure, bool, time.Duration) {
 		f.CanRetry = p.Status == 503 || p.Code == "MODEL_RESULT_INVALID" || p.Code == "MODEL_RESULT_NOT_SUBMITTED" || p.Code == "MODEL_OUTPUT_TRUNCATED" || p.Code == "REVIEW_RESULT_INVALID" || p.Code == "REVIEW_COVERAGE_INCOMPLETE" || p.Code == "REVIEW_BUDGET_EXHAUSTED" || p.Code == "REVIEW_INPUT_TOO_LARGE" || p.Code == "AGENT_NO_PROGRESS" || p.Code == "RESOURCE_LIMIT_EXCEEDED" || p.Code == "WORKFLOW_BUDGET_EXHAUSTED" || p.Code == "WORKFLOW_RESULT_INVALID" || p.Code == "WORKFLOW_REVIEW_UNRESOLVED" || p.Code == "WORKFLOW_CAPACITY_EXCEEDED" || p.Code == "WORKFLOW_EVIDENCE_CHANGED"
 		if canRetry, ok := p.Meta["can_retry"].(bool); ok {
 			f.CanRetry = canRetry
-		} else if slices.Contains([]string{"ARTICLE_BUDGET_EXHAUSTED", "ARTICLE_NO_PROGRESS", "ARTICLE_RESOURCE_EXHAUSTED", "ARTICLE_CAPACITY_EXCEEDED", "ARTICLE_CANDIDATE_CHANGED", "ARTICLE_EVIDENCE_CHANGED"}, p.Code) {
+		} else if slices.Contains([]string{"ARTICLE_BUDGET_EXHAUSTED", "ARTICLE_NO_PROGRESS", "ARTICLE_RESOURCE_EXHAUSTED", "ARTICLE_CAPACITY_EXCEEDED", "ARTICLE_CANDIDATE_CHANGED", "ARTICLE_EVIDENCE_CHANGED", "ARTICLE_REPAIR_LIMIT", "ARTICLE_REVIEW_PROTOCOL_FAILED"}, p.Code) {
 			// A new request may import the retained workspace, but this terminal
 			// run must never automatically receive a fresh execution budget.
 			f.CanRetry = true

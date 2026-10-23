@@ -61,6 +61,33 @@ func loopScopeChapters(scope domain.ArticleReviewScope, a domain.Article) domain
 		}
 	}
 	scope.FrameIDs = frames
+	// 完整章节的跨范围引用仍须交付原文；补充证据不扩大本轮主题覆盖义务。
+	scope = loopScopeEvidence(scope, a)
+	return scope
+}
+
+func loopScopeEvidence(scope domain.ArticleReviewScope, a domain.Article) domain.ArticleReviewScope {
+	collect := func(refs []string) {
+		for _, ref := range refs {
+			for _, id := range a.Citations[ref].SegmentIDs {
+				if !slices.Contains(scope.SourceIDs, id) {
+					scope.ContextSourceIDs = appendUnique(scope.ContextSourceIDs, id)
+				}
+			}
+		}
+	}
+	for _, section := range a.Sections {
+		if slices.Contains(scope.SectionIDs, section.ID) {
+			for _, block := range section.Blocks {
+				collect(blockCitationIDs(block))
+			}
+		}
+	}
+	for _, limitation := range a.Limitations {
+		if len(limitation.SectionIDs) == 0 || slices.ContainsFunc(limitation.SectionIDs, func(id string) bool { return slices.Contains(scope.SectionIDs, id) }) {
+			collect(limitation.CitationIDs)
+		}
+	}
 	return scope
 }
 

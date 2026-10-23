@@ -59,6 +59,11 @@ type articleLoopState struct {
 	ReviewSourceLimit   int                                    `json:"review_source_limit,omitempty"`
 	OutputSections      int                                    `json:"output_sections"`
 	InspectionKeys      []string                               `json:"inspection_keys,omitempty"`
+	ReviewRevision      string                                 `json:"review_revision,omitempty"`
+	ReviewCache         map[string]string                      `json:"review_cache,omitempty"`
+	RepairRounds        int                                    `json:"repair_rounds,omitempty"`
+	RepairActions       int                                    `json:"repair_actions,omitempty"`
+	ReviewWorkLimit     int                                    `json:"review_work_limit,omitempty"`
 }
 type articleLoopCall struct {
 	Slot         int                        `json:"slot"`
@@ -90,6 +95,9 @@ func (s *session) validateArticleLoopState() error {
 	if l.ReviewSourceLimit < 0 {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章核验工作范围损坏。")
 	}
+	if l.ReviewRevision != "" && l.ReviewRevision != domain.ArticleConvergenceReviewV1 || l.RepairRounds < 0 || l.RepairActions < 0 || l.ReviewWorkLimit < 0 || l.ReviewWorkLimit > loopReviewWorkRunes {
+		return domain.Err(422, "INTERNAL_FAILURE", "文章收敛策略或修订账损坏。")
+	}
 	return nil
 }
 func loopStop(code, message string) error {
@@ -120,6 +128,10 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 			limit = min(limit, s.spec.DetailPolicy.NoProgressLimit)
 		}
 		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV1
+			s.cp.ArticleLoop.ReviewCache = map[string]string{}
+		}
 		s.cp.Protocol = s.cp.ExecutionContract.Version
 		s.cp.LayoutVersion = "article-workspace-v1"
 		s.cp.Ready = true
@@ -164,6 +176,9 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 				return err
 			}
 			l.Pending = pending
+			if s.loopConvergence() && pending.Mode == "author" && len(l.Issues) > 0 {
+				l.RepairActions++
+			}
 			s.cp.Calls++
 			if err = s.persist(ctx, nil); err != nil {
 				return err
@@ -270,7 +285,13 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 		l.OutputSections = max(1, l.OutputSections/2)
 		// A truncated review is split as a scope, never routed to the author.
 		if p.Mode == "review" {
-			if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && len(p.Scope.SourceIDs) > 1 {
+			if s.loopConvergence() {
+				_, draft, err := s.loadLoopDraft(ctx)
+				if err != nil {
+					return err
+				}
+				l.ReviewWorkLimit = min(loopReviewWorkRunes, max(1000, s.loopScopeWork(draft.Article, *p.Scope)/2))
+			} else if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && len(p.Scope.SourceIDs) > 1 {
 				limit := (len(p.Scope.SourceIDs) + 1) / 2
 				if l.ReviewSourceLimit == 0 || limit < l.ReviewSourceLimit {
 					l.ReviewSourceLimit = limit
@@ -354,19 +375,35 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	}
 	key := fmt.Sprint("loop:", p.Slot)
 	switch name {
-	case loopSaveTool:
+	case loopSaveTool, loopPatchTool:
 		var in loopSaveInput
-		if err = loopDecode(raw, &in); err != nil {
-			break
-		}
-		if s.cp.ExecutionContract.Version != domain.ArticleLoopV2 && len(in.Sections) > l.OutputSections {
-			l.Feedback = domain.JSON(map[string]any{"failure": "output_scope", "max_sections": l.OutputSections})
-			return false, nil
+		var result any
+		var progress bool
+		var e error
+		if name == loopPatchTool {
+			if !s.loopConvergence() {
+				err = errors.New("block revision is unavailable under the admitted contract")
+				break
+			}
+			var patch loopPatchInput
+			if err = loopDecode(raw, &patch); err != nil {
+				break
+			}
+			in.Finish = patch.Finish
+			result, progress, e = s.patchLoopBlocks(ctx, key, patch)
+		} else {
+			if err = loopDecode(raw, &in); err != nil {
+				break
+			}
+			if s.cp.ExecutionContract.Version != domain.ArticleLoopV2 && len(in.Sections) > l.OutputSections {
+				l.Feedback = domain.JSON(map[string]any{"failure": "output_scope", "max_sections": l.OutputSections})
+				return false, nil
+			}
+			result, progress, e = s.saveLoopSections(ctx, key, in)
 		}
 		// V2's smaller output target guides recovery from malformed/truncated
 		// responses. A complete valid write is still governed by the frozen
 		// 40-section/128-KiB limits, not rejected for exceeding that suggestion.
-		result, progress, e := s.saveLoopSections(ctx, key, in)
 		if e != nil {
 			return false, e
 		}
@@ -603,7 +640,7 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 	}
 	l.CandidateHash = hash
 	l.EvidenceFingerprint = fingerprint
-	l.PolicyRevision = domain.ArticlePolicyIdentityForContract(s.spec, s.cp.ExecutionContract.Version)
+	l.PolicyRevision = domain.ArticleReviewPolicyIdentity(s.spec, s.cp.ExecutionContract.Version, l.ReviewRevision)
 	l.DraftVersion = saved.Version
 	l.ReviewKeys = nil
 	l.Issues = nil
@@ -614,10 +651,18 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 	if err != nil {
 		return false, err
 	}
-	if len(scopes) > l.Budget.Calls-s.cp.Calls {
+	if !s.loopConvergence() && len(scopes) > l.Budget.Calls-s.cp.Calls {
 		return false, loopStop("ARTICLE_BUDGET_EXHAUSTED", "剩余预算不足以完成当前候选的全部核验")
 	}
 	l.Scopes = scopes
+	if s.loopConvergence() {
+		if err := s.reuseLoopReviews(ctx, d.Article); err != nil {
+			return false, err
+		}
+	}
+	if len(l.Scopes) > l.Budget.Calls-s.cp.Calls {
+		return false, loopStop("ARTICLE_BUDGET_EXHAUSTED", "剩余预算不足以完成新稿的必要局部核验和全文关系核对")
+	}
 	l.Feedback = nil
 	return true, nil
 }
