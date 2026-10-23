@@ -34,7 +34,7 @@ const loopEditorialReviewInstructions = `
 修正建议须检查全文已有覆盖：挪动或删除引语前，对照当前候选是否已完整保留该事实、条件和必要细节。删除有重复表达的装饰引语可以成立，不强求逐字重复；删掉唯一必要信息则属于AC02。此边界不撤销既有阻断，unresolved_findings仍须逐条独立裁决。`
 
 const loopExclusivePatchInstructions = `
-同一行动中replacements与remove_block_ids互斥：同一个block_id只能替换一次或删除一次，不能同时出现；删除不是移动，不能用同ID替换加删除来移动块。冗余内容仅在全文已有实质覆盖时删除；确需搬移唯一信息时，用save_sections在一次原子行动中完整替换受影响章节，保留全部必要正文和sources。冲突会整次拒绝，不会部分保存。`
+一次行动允许替换一些块并删除其他块；同一个block_id只能在replacements中替换一次或在remove_block_ids中删除一次，不能同时出现。删除不是移动，不能用同ID替换加删除来移动块。冗余内容仅在全文已有实质覆盖时删除；确需搬移唯一信息时，用save_sections在一次原子行动中完整替换受影响章节，保留全部必要正文和sources。冲突会整次拒绝，不会部分保存。`
 
 func loopChallengeFindings(issues []domain.ArticleReviewIssue) []any {
 	out := []any{}
