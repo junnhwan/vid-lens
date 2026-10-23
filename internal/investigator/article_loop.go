@@ -95,7 +95,7 @@ func (s *session) validateArticleLoopState() error {
 	if l.ReviewSourceLimit < 0 {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章核验工作范围损坏。")
 	}
-	if l.ReviewRevision != "" && l.ReviewRevision != domain.ArticleConvergenceReviewV1 || l.RepairRounds < 0 || l.RepairActions < 0 || l.ReviewWorkLimit < 0 || l.ReviewWorkLimit > loopReviewWorkRunes {
+	if l.ReviewRevision != "" && !domain.ArticleConvergenceReview(l.ReviewRevision) || l.RepairRounds < 0 || l.RepairActions < 0 || l.ReviewWorkLimit < 0 || l.ReviewWorkLimit > loopReviewWorkRunes {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章收敛策略或修订账损坏。")
 	}
 	return nil
@@ -129,7 +129,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 		}
 		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV1
+			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV2
 			s.cp.ArticleLoop.ReviewCache = map[string]string{}
 		}
 		s.cp.Protocol = s.cp.ExecutionContract.Version

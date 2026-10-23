@@ -116,7 +116,7 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 		if mode == "author" && len(l.Issues) > 0 && (l.RepairRounds >= loopRepairRoundLimit || l.RepairActions >= loopRepairActionLimit) {
 			return nil, nil, nil, loopStop("ARTICLE_REPAIR_LIMIT", "阻断问题未在冻结的三轮核验、每轮三次修订行动内解决，不再重复修稿")
 		}
-		if mode == "review" && l.Failures["review_protocol:"+l.Scopes[0].ID] >= loopReviewProtocolLimit {
+		if mode == "review" && l.Failures[s.loopReviewProtocolKey(l.Scopes[0].ID)] >= loopReviewProtocolLimit {
 			return nil, nil, nil, loopStop("ARTICLE_REVIEW_PROTOCOL_FAILED", "同一核验范围两次未返回有效报告，不再重复审核")
 		}
 	}
@@ -307,8 +307,11 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			system += "\n" + loopGroundedReviewInstructions + "\n" + loopGroundedSeverityInstruction + "\n" + loopFaithfulReviewInstructions
 			system += "\n每条issues必须显式填写severity字段，值只能是blocking或advisory；不能只写ac而省略severity。视觉问题的evidence_ids优先使用delivered_pixels里的完整id（与visual_observations.frame_id一致）；候选配图引用已绑定相同的不可变图片ID，不按文章出现顺序重新编号。"
 		}
+		if s.loopCompactReview() {
+			system = loopCompactReviewInstructions
+		}
 		payload["scope"] = p.Scope
-		if s.loopConvergence() {
+		if s.loopConvergence() && !s.loopCompactReview() {
 			headings := []map[string]string{}
 			for _, section := range d.Article.Sections {
 				headings = append(headings, map[string]string{"section_id": section.ID, "title": section.Title})
@@ -497,7 +500,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	payload["delivered_pixels"] = frames
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-		system += "\n" + loopArticleFirstInstructions
+		if !s.loopCompactReview() || p.Mode != "review" {
+			system += "\n" + loopArticleFirstInstructions
+		}
 		system += "\n每次工具调用先输出activity_title：用简短中文概括本次具体行动，点明主题、章节或画面，避免重复通用标题。只描述可公开的行动意图，不输出内部推理，不预先宣称保存成功或核验通过。"
 	}
 	input := []*schema.Message{schema.SystemMessage(system), schema.UserMessage(string(domain.JSON(payload)))}
@@ -508,7 +513,11 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		candidatePayload = map[string]any{"candidate": payload["candidate"], "visual_claims": payload["visual_claims"]}
 		delete(payload, "candidate")
 		delete(payload, "visual_claims")
-		input = []*schema.Message{schema.SystemMessage(system + "\n" + loopReadingInstructions), schema.UserMessage(string(domain.JSON(payload)))}
+		readingSystem := system
+		if !s.loopCompactReview() {
+			readingSystem += "\n" + loopReadingInstructions
+		}
+		input = []*schema.Message{schema.SystemMessage(readingSystem), schema.UserMessage(string(domain.JSON(payload)))}
 	}
 	if len(p.Frames) > 0 {
 		parts, e := s.imageInput(ctx, p.Frames, fmt.Sprint("article-loop:", p.Slot))
@@ -674,6 +683,16 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 	l.Scopes = []domain.ArticleReviewScope{scope}
 	if s.loopConvergence() {
 		l.Scopes = s.convergentLoopScopes(a)
+	}
+	if s.loopCompactReview() && l.RepairRounds > 0 && l.ReviewWorkLimit == 0 {
+		count, err := s.loopPendingReviewCount(ctx, a, l.Scopes)
+		if err != nil {
+			return nil, err
+		}
+		// 实测高推理档固定开销很高；需要多个局部调用时用一次综合核对。
+		if count > 3 {
+			l.Scopes = []domain.ArticleReviewScope{scope}
+		}
 	}
 	for i := 0; i < len(l.Scopes); i++ {
 		task := l.Scopes[i]
@@ -1034,6 +1053,9 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	}
 	if err == nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		report = loopReviewLocations(report, d.Article)
+		if s.loopCompactReview() {
+			report = loopOwnedTopics(report, scope, s.transcript)
+		}
 		err = domain.ValidateArticleReviewSeverity(report.Issues)
 	}
 	if err == nil {
@@ -1045,7 +1067,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if err != nil {
 		l.Feedback = loopReviewFailureFeedback(err, raw)
 		if s.loopConvergence() {
-			l.Failures["review_protocol:"+scope.ID]++
+			l.Failures[s.loopReviewProtocolKey(scope.ID)]++
 		}
 		return false, nil
 	}
@@ -1074,6 +1096,9 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 			l.ReviewCache = map[string]string{}
 		}
 		l.ReviewCache[record.MaterialHash] = key
+	}
+	if err := s.cacheLoopReviewSubsets(ctx, d.Article, record, key); err != nil {
+		return false, err
 	}
 	l.Issues = append(l.Issues, report.Issues...)
 	l.Scopes = slices.DeleteFunc(l.Scopes, func(v domain.ArticleReviewScope) bool { return v.ID == scope.ID })
@@ -1117,4 +1142,34 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		return false, e
 	}
 	return true, nil
+}
+
+// 补充上下文的主题只是导航，不能冒充本轮覆盖或把未交付章节算成已经审过。
+func loopOwnedTopics(report domain.ArticleReviewReport, scope domain.ArticleReviewScope, text []domain.Segment) domain.ArticleReviewReport {
+	if scope.Global || len(scope.SourceIDs) == 0 {
+		return report
+	}
+	primary := map[string]bool{}
+	for i, part := range text {
+		if slices.Contains(scope.SourceIDs, part.ID) {
+			primary[part.ID] = true
+			primary[fmt.Sprint("t", i+1)] = true
+		}
+	}
+	topics := []domain.ArticleTopic{}
+	for _, topic := range report.Topics {
+		if !slices.ContainsFunc(topic.SourceIDs, func(id string) bool { return primary[id] }) {
+			continue
+		}
+		ids := []string{}
+		for _, id := range topic.SectionIDs {
+			if slices.Contains(scope.SectionIDs, id) {
+				ids = append(ids, id)
+			}
+		}
+		topic.SectionIDs = ids
+		topics = append(topics, topic)
+	}
+	report.Topics = topics
+	return report
 }

@@ -149,14 +149,21 @@ func testLoopReviewReuse(t *testing.T, corrupt bool) {
 					t.Error("全文关系核对没有实际完整正文")
 				}
 			} else {
-				var originals []loopOriginal
-				_ = json.Unmarshal(p["originals"], &originals)
-				if originals[0].Alias == "t1" {
+				var scope domain.ArticleReviewScope
+				_ = json.Unmarshal(p["scope"], &scope)
+				var reading domain.ArticleReading
+				_ = json.Unmarshal(p["candidate"], &reading)
+				if scope.Global {
 					firstReviews.Add(1)
-				} else if secondReviews.Add(1) == 1 {
-					var reading domain.ArticleReading
-					_ = json.Unmarshal(p["candidate"], &reading)
-					report.Issues = []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC03", Location: reading.Sections[0].Blocks[0].ID, EvidenceIDs: []string{"t13"}, Problem: "第二章的合成事实错误", Correction: "只修正第二章正文"}}
+					if len(reading.Sections) != 2 {
+						t.Fatal("综合核验未收到完整正文")
+					}
+					report.Issues = []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC03", Location: reading.Sections[1].Blocks[0].ID, EvidenceIDs: []string{"t13"}, Problem: "第二章的合成事实错误", Correction: "只修正第二章正文"}}
+				} else {
+					secondReviews.Add(1)
+					if len(reading.Sections) != 1 || reading.Sections[0].Title != "第二部分" {
+						t.Error("未改章节没有从已完成综合核验中复用")
+					}
 				}
 			}
 			writeReviewWireArgs(w, loopReviewTool, report)
@@ -214,7 +221,7 @@ func testLoopReviewReuse(t *testing.T, corrupt bool) {
 		t.Fatal(err)
 	}
 	s = reloadLoopSession(t, s)
-	if calls.Load() != 6 || firstReviews.Load() != 1 || secondReviews.Load() != 2 || globals.Load() != 1 {
+	if calls.Load() != 5 || firstReviews.Load() != 1 || secondReviews.Load() != 1 || globals.Load() != 1 {
 		t.Fatalf("局部修改重复全文事实核验：calls=%d first=%d second=%d global=%d", calls.Load(), firstReviews.Load(), secondReviews.Load(), globals.Load())
 	}
 	var reused int

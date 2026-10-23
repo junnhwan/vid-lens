@@ -11,6 +11,11 @@ import (
 
 const ArticleLoopPolicy = "article-ac01-10-lc01-12-v1"
 const ArticleConvergenceReviewV1 = "scoped-convergence-2026-10-23-v1"
+const ArticleConvergenceReviewV2 = "integrated-convergence-2026-10-23-v2"
+
+func ArticleConvergenceReview(revision string) bool {
+	return revision == ArticleConvergenceReviewV1 || revision == ArticleConvergenceReviewV2
+}
 
 // These identities are owned by the program, never accepted from author tools.
 type ArticleReviewScope struct {
@@ -22,8 +27,8 @@ type ArticleReviewScope struct {
 	Global           bool     `json:"global"`
 }
 type ArticleReviewIssue struct {
-	Severity    string   `json:"severity" jsonschema:"enum=blocking,enum=advisory"`
-	AC          string   `json:"ac" jsonschema:"description=AC02 through AC07"`
+	Severity    string   `json:"severity" jsonschema:"enum=blocking,enum=advisory,description=Use blocking for every remaining factual/citation/coverage/visual/uncertainty defect. Advisory is allowed ONLY for AC06 wording/layout preferences. Omit withdrawn criticism."`
+	AC          string   `json:"ac" jsonschema:"description=AC02 through AC07. AC02/AC03/AC04/AC05/AC07 require severity=blocking; only AC06 permits advisory."`
 	Location    string   `json:"location" jsonschema:"description=Candidate section/block or missing topic"`
 	EvidenceIDs []string `json:"evidence_ids" jsonschema:"description=Delivered tN/fN aliases or their exact original/frame IDs from this review scope"`
 	Problem     string   `json:"problem"`
@@ -76,6 +81,7 @@ type ArticleReviewRecord struct {
 	VisualObservations  []ArticleVisualObservation `json:"visual_observations,omitempty"`
 	MaterialHash        string                     `json:"material_hash,omitempty"`
 	ReusedFrom          string                     `json:"reused_from,omitempty"`
+	ReuseKind           string                     `json:"reuse_kind,omitempty"`
 }
 type ArticleApproval struct {
 	CandidateHash       string   `json:"candidate_hash"`

@@ -16,7 +16,11 @@ const loopRepairActionLimit = 3
 const loopReviewProtocolLimit = 2
 
 func (s *session) loopConvergence() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV1
+	return s.cp.ArticleLoop != nil && domain.ArticleConvergenceReview(s.cp.ArticleLoop.ReviewRevision)
+}
+
+func (s *session) loopCompactReview() bool {
+	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV2
 }
 
 func loopBlocking(issues []domain.ArticleReviewIssue) bool {
@@ -50,8 +54,12 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 	return scope
 }
 
-// 按完整章节及其真实证据分组，首次就限制工作量，不用五分钟超时探测容量。
+// 新修订优先综合核验，容量不足时拆分；修稿后按完整章节复用未变材料。
 func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewScope {
+	return s.buildLoopScopes(a, s.loopCompactReview() && s.cp.ArticleLoop.RepairRounds > 0)
+}
+
+func (s *session) buildLoopScopes(a domain.Article, units bool) []domain.ArticleReviewScope {
 	limit := loopReviewWorkRunes
 	if s.cp.ArticleLoop.ReviewWorkLimit > 0 {
 		limit = s.cp.ArticleLoop.ReviewWorkLimit
@@ -69,7 +77,7 @@ func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewS
 		scope.ID = store.Hash(scope)[:24]
 		return scope
 	}
-	if len(a.Sections) == 0 || s.loopScopeWork(a, whole) <= limit {
+	if len(a.Sections) == 0 || !units && (s.loopCompactReview() && s.cp.ArticleLoop.ReviewWorkLimit == 0 || s.loopScopeWork(a, whole) <= limit) {
 		return []domain.ArticleReviewScope{seal(whole)}
 	}
 	chapters := make([]domain.ArticleReviewScope, len(a.Sections))
@@ -130,7 +138,7 @@ func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewS
 	current := domain.ArticleReviewScope{}
 	for _, chapter := range chapters {
 		next := join(current, chapter)
-		if len(current.SectionIDs) > 0 && (s.loopScopeWork(a, next) > limit || len(next.FrameIDs) > 4) {
+		if len(current.SectionIDs) > 0 && (units || s.loopScopeWork(a, next) > limit || len(next.FrameIDs) > 4) {
 			scopes = append(scopes, seal(current))
 			current = canonical(chapter)
 		} else {
@@ -236,6 +244,13 @@ func loopReviewKey(candidate, evidence, scope string) string {
 	return "article-loop:review:" + store.Hash(map[string]any{"candidate": candidate, "evidence": evidence, "scope": scope})
 }
 
+func (s *session) loopReviewProtocolKey(scope string) string {
+	if s.loopCompactReview() {
+		return "review_protocol:" + s.cp.ArticleLoop.CandidateHash + ":" + scope
+	}
+	return "review_protocol:" + scope
+}
+
 func (s *session) loopPendingReviewCount(ctx context.Context, a domain.Article, scopes []domain.ArticleReviewScope) (int, error) {
 	count := 0
 	for _, scope := range scopes {
@@ -247,14 +262,64 @@ func (s *session) loopPendingReviewCount(ctx context.Context, a domain.Article, 
 		if err != nil {
 			return 0, err
 		}
-		if s.cp.ArticleLoop.ReviewCache[hash] == "" {
+		key, err := s.loopReusableReview(ctx, a, scope, hash)
+		if err != nil {
+			return 0, err
+		}
+		if key == "" {
 			count++
 		}
 	}
 	return count, nil
 }
 
-// 只从本运行的原始局部核验复用逐字相同的材料；每次重新绑定新候选，绝不继承全文批准。
+func (s *session) loopReusableReview(ctx context.Context, a domain.Article, scope domain.ArticleReviewScope, material string) (string, error) {
+	l := s.cp.ArticleLoop
+	if key := l.ReviewCache[material]; key != "" {
+		return key, nil
+	}
+	if !s.loopCompactReview() || scope.Global {
+		return "", nil
+	}
+	keys := []string{}
+	for _, key := range l.ReviewCache {
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
+		if err != nil {
+			return "", err
+		}
+		var record domain.ArticleReviewRecord
+		if json.Unmarshal(op.Result, &record) != nil || record.ReusedFrom != "" || record.PolicyRevision != l.PolicyRevision || !record.Report.Complete || len(record.Report.Unassessed) > 0 || !domain.ArticleReviewScopeContains(record.Scope, scope) {
+			continue
+		}
+		parent, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "article-loop:candidate:"+record.CandidateHash)
+		if err != nil {
+			return "", err
+		}
+		var prior domain.Article
+		if json.Unmarshal(parent.Result, &prior) != nil || domain.ArticleHash(prior) != record.CandidateHash {
+			continue
+		}
+		if _, ok := domain.ArticleReviewSubset(record.Report, prior, scope, s.transcript); !ok {
+			continue
+		}
+		hash, err := s.loopMaterialHash(ctx, prior, scope)
+		if err != nil {
+			return "", err
+		}
+		if hash == material {
+			return key, nil
+		}
+	}
+	return "", nil
+}
+
+// 只从本运行的原始完整核验复用逐字相同的局部材料；重新绑定候选，不继承全文批准。
 func (s *session) reuseLoopReviews(ctx context.Context, a domain.Article) error {
 	l := s.cp.ArticleLoop
 	pending := []domain.ArticleReviewScope{}
@@ -267,7 +332,10 @@ func (s *session) reuseLoopReviews(ctx context.Context, a domain.Article) error 
 		if err != nil {
 			return err
 		}
-		previous := l.ReviewCache[material]
+		previous, err := s.loopReusableReview(ctx, a, scope, material)
+		if err != nil {
+			return err
+		}
 		if previous == "" {
 			pending = append(pending, scope)
 			continue
@@ -277,8 +345,39 @@ func (s *session) reuseLoopReviews(ctx context.Context, a domain.Article) error 
 			return err
 		}
 		var record domain.ArticleReviewRecord
-		if json.Unmarshal(op.Result, &record) != nil || op.Kind != "article_loop_review" || op.Status != "completed" || record.ReusedFrom != "" || record.MaterialHash != material || record.PolicyRevision != l.PolicyRevision || !record.Report.Complete || len(record.Report.Unassessed) > 0 || loopBlocking(record.Report.Issues) {
+		if json.Unmarshal(op.Result, &record) != nil || op.Kind != "article_loop_review" || op.Status != "completed" || record.ReusedFrom != "" || record.PolicyRevision != l.PolicyRevision || !record.Report.Complete || len(record.Report.Unassessed) > 0 {
 			return loopStop("INTERNAL_FAILURE", "局部核验复用材料或策略不一致")
+		}
+		if record.MaterialHash != material {
+			if !s.loopCompactReview() || !domain.ArticleReviewScopeContains(record.Scope, scope) {
+				return loopStop("INTERNAL_FAILURE", "核验超集未覆盖当前局部义务")
+			}
+			parent, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "article-loop:candidate:"+record.CandidateHash)
+			if err != nil {
+				return err
+			}
+			var prior domain.Article
+			if json.Unmarshal(parent.Result, &prior) != nil || domain.ArticleHash(prior) != record.CandidateHash {
+				return loopStop("INTERNAL_FAILURE", "原核验候选身份不一致")
+			}
+			priorHash, err := s.loopMaterialHash(ctx, prior, scope)
+			if err != nil {
+				return err
+			}
+			if priorHash != material {
+				return loopStop("INTERNAL_FAILURE", "变化后的局部内容不能继承原核验")
+			}
+			projected, ok := domain.ArticleReviewSubset(record.Report, prior, scope, s.transcript)
+			if !ok {
+				return loopStop("INTERNAL_FAILURE", "受阻断问题影响的范围不能限制为局部批准")
+			}
+			record.Report = projected
+			record.VisualObservations = domain.ArticleReviewSubsetObservations(record.VisualObservations, scope)
+			record.Scope = scope
+			record.MaterialHash = material
+			record.ReuseKind = "completed_scope_subset"
+		} else if loopBlocking(record.Report.Issues) {
+			return loopStop("INTERNAL_FAILURE", "带阻断问题的材料不能复用")
 		}
 		record.ReusedFrom = previous
 		record.CandidateHash, record.EvidenceFingerprint = l.CandidateHash, l.EvidenceFingerprint
@@ -290,5 +389,29 @@ func (s *session) reuseLoopReviews(ctx context.Context, a domain.Article) error 
 		l.Issues = append(l.Issues, record.Report.Issues...)
 	}
 	l.Scopes = pending
+	return nil
+}
+
+func (s *session) cacheLoopReviewSubsets(ctx context.Context, a domain.Article, record domain.ArticleReviewRecord, key string) error {
+	if !s.loopCompactReview() || record.Scope.Global && len(record.Scope.SourceIDs) == 0 {
+		return nil
+	}
+	l := s.cp.ArticleLoop
+	if l.ReviewCache == nil {
+		l.ReviewCache = map[string]string{}
+	}
+	for _, scope := range s.buildLoopScopes(a, true) {
+		if !domain.ArticleReviewScopeContains(record.Scope, scope) {
+			continue
+		}
+		if _, ok := domain.ArticleReviewSubset(record.Report, a, scope, s.transcript); !ok {
+			continue
+		}
+		hash, err := s.loopMaterialHash(ctx, a, scope)
+		if err != nil {
+			return err
+		}
+		l.ReviewCache[hash] = key
+	}
 	return nil
 }

@@ -81,7 +81,7 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	if err != nil {
 		return err
 	}
-	if cp.Loop.ReviewRevision != "" && cp.Loop.ReviewRevision != domain.ArticleConvergenceReviewV1 {
+	if cp.Loop.ReviewRevision != "" && !domain.ArticleConvergenceReview(cp.Loop.ReviewRevision) {
 		return articleLoopGateError()
 	}
 	policy := domain.ArticleReviewPolicyIdentity(spec, cp.Contract.Version, cp.Loop.ReviewRevision)
@@ -106,7 +106,10 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 		if cp.Contract.Version == domain.ArticleLoopV2 && domain.ValidateArticleReviewSeverity(record.Report.Issues) != nil {
 			return articleLoopGateError()
 		}
-		if cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV1 {
+		if domain.ArticleConvergenceReview(cp.Loop.ReviewRevision) {
+			if record.ReusedFrom == "" && record.ReuseKind != "" {
+				return articleLoopGateError()
+			}
 			material := domain.ArticleReviewMaterialIdentity(a, record.Scope, snap, transcript, assets)
 			if record.MaterialHash != material {
 				return articleLoopGateError()
@@ -116,11 +119,29 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 					return articleLoopGateError()
 				}
 				original, e := one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, record.ReusedFrom)
-				if e != nil || original.ReusedFrom != "" || original.MaterialHash != material || original.PolicyRevision != policy || !original.Report.Complete || len(original.Report.Unassessed) > 0 || domain.ContentHash(original.Scope) != domain.ContentHash(record.Scope) || domain.ContentHash(original.Report) != domain.ContentHash(record.Report) || domain.ContentHash(original.VisualObservations) != domain.ContentHash(record.VisualObservations) {
+				if e != nil || original.ReusedFrom != "" || original.PolicyRevision != policy || !original.Report.Complete || len(original.Report.Unassessed) > 0 {
 					return articleLoopGateError()
 				}
 				prior, e := one[domain.Article](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_candidate' AND status='completed'", c.Run.ID, "article-loop:candidate:"+original.CandidateHash)
-				if e != nil || domain.ArticleHash(prior) != original.CandidateHash || domain.ArticleReviewMaterialIdentity(prior, original.Scope, snap, transcript, assets) != material {
+				if e != nil || domain.ArticleHash(prior) != original.CandidateHash {
+					return articleLoopGateError()
+				}
+				if record.ReuseKind == "completed_scope_subset" {
+					if cp.Loop.ReviewRevision != domain.ArticleConvergenceReviewV2 || !domain.ArticleReviewScopeContains(original.Scope, record.Scope) {
+						return articleLoopGateError()
+					}
+					parentAssets, e := many[domain.Asset](ctx, tx, "SELECT to_jsonb(a) FROM media_assets a WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE", original.Scope.FrameIDs)
+					if e != nil || len(parentAssets) != len(original.Scope.FrameIDs) {
+						return articleLoopGateError()
+					}
+					if original.MaterialHash != domain.ArticleReviewMaterialIdentity(prior, original.Scope, snap, transcript, parentAssets) || domain.ArticleReviewMaterialIdentity(prior, record.Scope, snap, transcript, assets) != material {
+						return articleLoopGateError()
+					}
+					projected, ok := domain.ArticleReviewSubset(original.Report, prior, record.Scope, transcript)
+					if !ok || domain.ContentHash(projected) != domain.ContentHash(record.Report) || domain.ContentHash(domain.ArticleReviewSubsetObservations(original.VisualObservations, record.Scope)) != domain.ContentHash(record.VisualObservations) {
+						return articleLoopGateError()
+					}
+				} else if record.ReuseKind != "" || original.MaterialHash != material || domain.ArticleReviewMaterialIdentity(prior, original.Scope, snap, transcript, assets) != material || domain.ContentHash(original.Scope) != domain.ContentHash(record.Scope) || domain.ContentHash(original.Report) != domain.ContentHash(record.Report) || domain.ContentHash(original.VisualObservations) != domain.ContentHash(record.VisualObservations) {
 					return articleLoopGateError()
 				}
 			}
