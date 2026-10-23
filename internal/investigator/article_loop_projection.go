@@ -193,7 +193,7 @@ func (s *session) loopAuthorDraft(a domain.Article, notes map[string]loopFrameNo
 		for _, block := range sec.Blocks {
 			content := loopContent{}
 			var err error
-			content.Sources, err = refs(block.CitationIDs)
+			content.Sources, err = refs(blockCitationIDs(block))
 			if err != nil {
 				return out, err
 			}
@@ -209,7 +209,7 @@ func (s *session) loopAuthorDraft(a domain.Article, notes map[string]loopFrameNo
 					content.Text = &value
 				}
 			case "code":
-				content.Code = &loopCode{Text: block.Text}
+				content.Code = &loopCode{Text: domain.BlockText(block)}
 				if block.Language != nil {
 					content.Code.Language = *block.Language
 				}

@@ -422,7 +422,7 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		if e != nil {
 			return false, e
 		}
-		l.Feedback = loopWriteFeedback(result, raw)
+		l.Feedback = loopWriteFeedback(result, raw, name)
 		write, _ := result.(map[string]any)
 		receipt, _ := write["receipt"].(*loopReceipt)
 		message := "本次章节未保存，已将具体错误反馈给模型；原有章节保留。"

@@ -175,3 +175,71 @@ func TestArticleLoopReviewAcceptsOnlyActuallyDeliveredIdentities(t *testing.T) {
 		t.Fatalf("out-of-scope feedback does not identify the exact topic and original: %v", err)
 	}
 }
+
+func TestArticleLoopImportedInlineCitationsSurviveAuthorProjection(t *testing.T) {
+	s := &session{transcript: []domain.Segment{{ID: "original"}}, cp: checkpoint{ArticleLoop: &articleLoopState{}}}
+	a := domain.Article{Sections: []domain.Section{{ID: "chapter", Blocks: []domain.Block{
+		{ID: "untouched", Type: "paragraph", Origin: "video", Content: []domain.Inline{{Type: "text", Text: "Saved source-backed paragraph."}, {Type: "citation", CitationID: "legacy_ref"}}},
+		{ID: "code", Type: "code", Origin: "video", Text: "value := 1", Content: []domain.Inline{{Type: "citation", CitationID: "legacy_ref"}}},
+	}}}, Citations: map[string]domain.Citation{"legacy_ref": {ID: "legacy_ref", Kind: "video_text", SegmentIDs: []string{"original"}}}}
+	projected, err := s.loopAuthorDraft(a, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, content := range projected.Sections[0].Content {
+		if len(content.Sources) != 1 || content.Sources[0] != "t1" {
+			t.Fatalf("imported block %d lost inline evidence before author/atomic patch: %+v", i, content)
+		}
+	}
+}
+
+func TestArticleLoopAtomicPatchPreservesImportedUntouchedInlineEvidence(t *testing.T) {
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if loopPayload(t, r)["scope"] != nil {
+			w.WriteHeader(503)
+			return
+		}
+		in := loopGoodWrite()
+		in.Sections[0].Content = in.Sections[0].Content[:1]
+		text := "同一章中不应被重写的旧段落，拥有自己的来源引用。"
+		in.Sections[0].Content = append(in.Sections[0].Content, loopContent{Text: &text, Sources: []string{"t2"}})
+		writeReviewWireArgs(w, loopSaveTool, in)
+	})
+	ctx := context.Background()
+	if s.engine.Run(ctx, s.claim, s.profile) == nil {
+		t.Fatal("expected review interruption")
+	}
+	s = reloadLoopSession(t, s)
+	saved, d, err := s.loadLoopDraft(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range d.Article.Sections[0].Blocks {
+		b := &d.Article.Sections[0].Blocks[i]
+		for _, ref := range b.CitationIDs {
+			b.Content = append(b.Content, domain.Inline{Type: "citation", CitationID: ref})
+		}
+		b.CitationIDs = nil
+	}
+	if saved, err = s.engine.Store.SaveArticleDraft(ctx, s.claim, "import-inline", nil, saved.Version, d); err != nil {
+		t.Fatal(err)
+	}
+	text := "按原文修正第一段，不能破坏第二段的证据。"
+	in := loopPatchInput{ExpectedVersion: saved.Version, Replacements: []loopBlockReplacement{{BlockID: d.Article.Sections[0].Blocks[0].ID, Content: loopContent{Text: &text, Sources: []string{"t1"}}}}}
+	result, progress, err := s.patchLoopBlocks(ctx, "patch-import", in)
+	if err != nil || !progress || result.(map[string]any)["error"] != nil {
+		t.Fatalf("valid one-block repair rejected due to untouched imported inline source: %v %v", result, err)
+	}
+	_, after, err := s.loadLoopDraft(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := after.Article.Sections[0].Blocks[1]
+	if domain.BlockText(b) != domain.BlockText(d.Article.Sections[0].Blocks[1]) || len(blockCitationIDs(b)) != 1 || blockCitationIDs(b)[0] != "t2" {
+		t.Fatal("untouched paragraph or evidence changed", b)
+	}
+	feedback := loopWriteFeedback(map[string]any{"error": "bad replacement"}, []byte(`{}`), loopPatchTool)
+	if !strings.Contains(string(feedback), `"previous_tool":"revise_blocks"`) {
+		t.Fatal("block repair feedback incorrectly asks for chapter save", string(feedback))
+	}
+}

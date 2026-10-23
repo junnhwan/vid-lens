@@ -1060,7 +1060,11 @@ func loopAuthorFailureFeedback(failure string, cause error, tool string, raw []b
 	return domain.JSON(feedback)
 }
 
-func loopWriteFeedback(result any, raw []byte) json.RawMessage {
+func loopWriteFeedback(result any, raw []byte, names ...string) json.RawMessage {
+	name := loopSaveTool
+	if len(names) > 0 {
+		name = names[0]
+	}
 	feedback, ok := result.(map[string]any)
 	if !ok {
 		return domain.JSON(result)
@@ -1072,13 +1076,16 @@ func loopWriteFeedback(result any, raw []byte) json.RawMessage {
 		if identity, ok := feedback["identity"]; ok {
 			detail += ": " + fmt.Sprint(identity)
 		}
-		repair := loopAuthorFailureFeedback("write_rejected", errors.New(detail), loopSaveTool, raw)
+		repair := loopAuthorFailureFeedback("write_rejected", errors.New(detail), name, raw)
 		var out map[string]any
 		_ = json.Unmarshal(repair, &out)
 		for k, v := range feedback {
 			out[k] = v
 		}
 		out["action"] = "This action was not saved. Correct the reported error at the authoritative draft version. For creation supply key only; for replacement supply section_id only and omit key. Each section identity occurs once per action. Keep all already accepted content."
+		if name == loopPatchTool {
+			out["action"] = "This block revision was not saved. Use the current draft version and exact block_id; correct only your replacements or removals. Chapter/content paths refer to the program-expanded atomic revision; unchanged blocks remain program-owned."
+		}
 		return domain.JSON(out)
 	}
 	receipt, ok := feedback["receipt"].(*loopReceipt)
