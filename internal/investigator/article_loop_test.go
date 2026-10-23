@@ -87,7 +87,19 @@ func loopGoodReport(t *testing.T, p map[string]json.RawMessage) domain.ArticleGr
 	for _, id := range scope.FrameIDs {
 		observations = append(observations, domain.ArticleVisualObservation{FrameID: id, VisibleFacts: []string{"合成黑色画面"}, Uncertainty: []string{"合成画面不能证明其他事实"}})
 	}
-	return domain.ArticleGroundedReviewReport{VisualObservations: observations, ArticleReviewReport: domain.ArticleReviewReport{Complete: true, Unassessed: []string{}, Topics: []domain.ArticleTopic{{Topic: "合成来源事实与后半段结尾", SourceIDs: refs, SectionIDs: scope.SectionIDs}}, Issues: []domain.ArticleReviewIssue{}}}
+	var pending []struct {
+		ID string `json:"issue_id"`
+	}
+	_ = json.Unmarshal(p["unresolved_findings"], &pending)
+	resolutions := []domain.ArticleReviewResolution{}
+	for _, issue := range pending {
+		quotes := []domain.ArticleEvidenceQuote{}
+		if len(originals) > 0 {
+			quotes = append(quotes, domain.ArticleEvidenceQuote{SourceID: originals[0].Alias, Quote: originals[0].Segment.Text})
+		}
+		resolutions = append(resolutions, domain.ArticleReviewResolution{IssueID: issue.ID, Outcome: "withdrawn", Explanation: "合成测试中的独立复核关闭意见；真实语义另行验证", EvidenceQuotes: quotes})
+	}
+	return domain.ArticleGroundedReviewReport{VisualObservations: observations, ArticleReviewReport: domain.ArticleReviewReport{Resolutions: resolutions, Complete: true, Unassessed: []string{}, Topics: []domain.ArticleTopic{{Topic: "合成来源事实与后半段结尾", SourceIDs: refs, SectionIDs: scope.SectionIDs}}, Issues: []domain.ArticleReviewIssue{}}}
 }
 func loopFixture(t *testing.T, handler http.HandlerFunc) *session {
 	t.Helper()

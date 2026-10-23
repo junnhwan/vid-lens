@@ -24,7 +24,7 @@ func (s *session) loopCompactReview() bool {
 }
 
 func (s *session) loopDeltaReview() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV3
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV3 || s.loopEvidenceReview())
 }
 
 func loopBlocking(issues []domain.ArticleReviewIssue) bool {
@@ -32,6 +32,9 @@ func loopBlocking(issues []domain.ArticleReviewIssue) bool {
 }
 
 func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewScope) domain.ArticleReviewScope {
+	if s.loopEvidenceReview() && len(scope.FrameIDs) == 0 {
+		scope.FrameIDs = nil
+	}
 	if scope.Global && len(scope.SourceIDs) == 0 {
 		return scope
 	}
@@ -50,6 +53,14 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 		}
 	}
 	scope.ContextSourceIDs = nil
+	if s.loopEvidenceReview() && !s.cp.ArticleLoop.LimitedReviewContext {
+		// Full originals are context, not extra coverage work. Capacity still checked before sending.
+		for _, original := range s.transcript {
+			if !slices.Contains(scope.SourceIDs, original.ID) {
+				contextIDs = appendUnique(contextIDs, original.ID)
+			}
+		}
+	}
 	for _, original := range s.transcript {
 		if slices.Contains(contextIDs, original.ID) {
 			scope.ContextSourceIDs = append(scope.ContextSourceIDs, original.ID)
@@ -60,6 +71,11 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 
 // 新修订优先综合核验，容量不足时拆分；修稿后按完整章节复用未变材料。
 func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewScope {
+	if s.loopEvidenceReview() {
+		if scopes := s.retainedLoopScopes(a); len(scopes) > 0 {
+			return scopes
+		}
+	}
 	return s.buildLoopScopes(a, s.loopCompactReview() && !s.loopDeltaReview() && s.cp.ArticleLoop.RepairRounds > 0)
 }
 
@@ -298,7 +314,7 @@ func (s *session) loopReusableReview(ctx context.Context, a domain.Article, scop
 			return "", err
 		}
 		var record domain.ArticleReviewRecord
-		if json.Unmarshal(op.Result, &record) != nil || record.ReusedFrom != "" || record.PolicyRevision != l.PolicyRevision || !record.Report.Complete || len(record.Report.Unassessed) > 0 || !domain.ArticleReviewScopeContains(record.Scope, scope) {
+		if json.Unmarshal(op.Result, &record) != nil || record.ReusedFrom != "" || record.Delta != nil || record.PolicyRevision != l.PolicyRevision || !record.Report.Complete || len(record.Report.Unassessed) > 0 || !domain.ArticleReviewScopeContains(record.Scope, scope) {
 			continue
 		}
 		parent, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "article-loop:candidate:"+record.CandidateHash)

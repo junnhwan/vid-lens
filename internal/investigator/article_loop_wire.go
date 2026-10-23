@@ -255,6 +255,11 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			return nil, err
 		}
 	} else {
+		if s.loopEvidenceReview() {
+			if err := add(utils.InferEnhancedTool(loopChallengeTool, "对当前全部剩余阻断提交有原文逐字反证的异议。不会直接关闭问题或批准；独立核验者必须重新对照。相同候选只允许一次异议。确有缺陷先修稿。", func(context.Context, loopChallengeInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
+				return nil, err
+			}
+		}
 		if s.loopConvergence() {
 			if err := add(utils.InferEnhancedTool(loopPatchTool, "优先用本工具修正已有正文：按真实block_id替换或删除少量完整语义块，或更新指定章的局限。未改正文和引用由程序保留；全部意图在同一版本下原子保存。finish=true请求核验新稿。不能自行关闭blocking。", func(context.Context, loopPatchInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
 				return nil, err

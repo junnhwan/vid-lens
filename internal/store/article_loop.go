@@ -106,8 +106,21 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 		if cp.Contract.Version == domain.ArticleLoopV2 && domain.ValidateArticleReviewSeverity(record.Report.Issues) != nil {
 			return articleLoopGateError()
 		}
+		if cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV4 && record.ReusedFrom == "" {
+			var prior domain.ArticleReviewRecord
+			if record.ReconcilesReviewKey != "" {
+				prior, e = one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, record.ReconcilesReviewKey)
+				if e != nil || prior.PolicyRevision != policy || domain.ContentHash(prior) != record.ReconcilesReviewHash || domain.ContentHash(prior.Scope) != domain.ContentHash(record.Scope) {
+					return articleLoopGateError()
+				}
+			}
+			if domain.ValidateArticleReviewResolutions(record.Report, prior, h, record.Scope, transcript) != nil {
+				return articleLoopGateError()
+			}
+		}
 		if record.Delta != nil {
-			if cp.Loop.ReviewRevision != domain.ArticleConvergenceReviewV3 || record.ReusedFrom != "" || !domain.ArticleReviewCoversWhole(record.Scope, a, transcript, ids) {
+			v4 := cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV4
+			if (cp.Loop.ReviewRevision != domain.ArticleConvergenceReviewV3 && !v4) || record.ReusedFrom != "" || (!v4 && !domain.ArticleReviewCoversWhole(record.Scope, a, transcript, ids)) {
 				return articleLoopGateError()
 			}
 			base, e := one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, record.Delta.ReviewKey)
@@ -115,18 +128,24 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 				return articleLoopGateError()
 			}
 			prior, e := one[domain.Article](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_candidate' AND status='completed'", c.Run.ID, "article-loop:candidate:"+base.CandidateHash)
-			if e != nil || domain.ArticleHash(prior) != base.CandidateHash || !domain.ArticleReviewCoversWhole(base.Scope, prior, transcript, ids) || base.MaterialHash != domain.ArticleReviewMaterialIdentity(prior, base.Scope, snap, transcript, assets) {
+			if e != nil || domain.ArticleHash(prior) != base.CandidateHash || (!v4 && !domain.ArticleReviewCoversWhole(base.Scope, prior, transcript, ids)) || base.MaterialHash != domain.ArticleReviewMaterialIdentity(prior, base.Scope, snap, transcript, assets) {
 				return articleLoopGateError()
 			}
 			delta, ok := domain.ArticleReviewDeltaFor(record.Delta.ReviewKey, base, prior, a)
+			if v4 {
+				delta, ok = domain.ArticleScopedReviewDeltaFor(record.Delta.ReviewKey, base, prior, a, record.Scope)
+			}
 			if !ok || domain.ContentHash(delta) != domain.ContentHash(record.Delta) {
 				return articleLoopGateError()
 			}
 			for _, issue := range record.Report.Issues {
-				if !delta.ContainsIssue(issue) {
+				if !v4 && !delta.ContainsIssue(issue) {
 					return articleLoopGateError()
 				}
 			}
+		}
+		if cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV4 && domain.ValidateArticleReviewQuotes(record.Report, record.Scope, transcript) != nil {
+			return articleLoopGateError()
 		}
 		if domain.ArticleConvergenceReview(cp.Loop.ReviewRevision) {
 			if record.ReusedFrom == "" && record.ReuseKind != "" {

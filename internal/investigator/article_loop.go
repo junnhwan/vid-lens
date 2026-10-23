@@ -33,38 +33,44 @@ type articleLoopBudget struct {
 	Deadline        time.Time `json:"deadline"`
 }
 type articleLoopState struct {
-	Version             int                                    `json:"version"`
-	Budget              articleLoopBudget                      `json:"budget"`
-	Pending             *articleLoopCall                       `json:"pending,omitempty"`
-	ReadSources         []string                               `json:"read_sources"`
-	SeenFrames          []string                               `json:"seen_frames"`
-	Frames              []string                               `json:"frames"`
-	NextSections        []string                               `json:"next_sections,omitempty"`
-	NextSources         []string                               `json:"next_sources,omitempty"`
-	NextFrames          []string                               `json:"next_frames,omitempty"`
-	CandidateHash       string                                 `json:"candidate_hash"`
-	DraftVersion        int                                    `json:"draft_version"`
-	EvidenceFingerprint string                                 `json:"evidence_fingerprint"`
-	PolicyRevision      string                                 `json:"policy_revision"`
-	Scopes              []domain.ArticleReviewScope            `json:"scopes,omitempty"`
-	ReviewKeys          []string                               `json:"review_keys,omitempty"`
-	Issues              []domain.ArticleReviewIssue            `json:"issues,omitempty"`
-	Feedback            json.RawMessage                        `json:"feedback,omitempty"`
-	NoProgress          int                                    `json:"no_progress"`
-	BlockedCandidates   map[string][]domain.ArticleReviewIssue `json:"blocked_candidates,omitempty"`
-	Failures            map[string]int                         `json:"failures"`
-	OutputTokens        int                                    `json:"output_tokens"`
-	SourceChars         int                                    `json:"source_chars"`
-	ReviewReserve       int                                    `json:"review_reserve"`
-	ReviewSourceLimit   int                                    `json:"review_source_limit,omitempty"`
-	OutputSections      int                                    `json:"output_sections"`
-	InspectionKeys      []string                               `json:"inspection_keys,omitempty"`
-	ReviewRevision      string                                 `json:"review_revision,omitempty"`
-	ReviewCache         map[string]string                      `json:"review_cache,omitempty"`
-	RepairRounds        int                                    `json:"repair_rounds,omitempty"`
-	RepairActions       int                                    `json:"repair_actions,omitempty"`
-	ReviewWorkLimit     int                                    `json:"review_work_limit,omitempty"`
-	ReviewBaseKey       string                                 `json:"review_base_key,omitempty"`
+	Version              int                                    `json:"version"`
+	Budget               articleLoopBudget                      `json:"budget"`
+	Pending              *articleLoopCall                       `json:"pending,omitempty"`
+	ReadSources          []string                               `json:"read_sources"`
+	SeenFrames           []string                               `json:"seen_frames"`
+	Frames               []string                               `json:"frames"`
+	NextSections         []string                               `json:"next_sections,omitempty"`
+	NextSources          []string                               `json:"next_sources,omitempty"`
+	NextFrames           []string                               `json:"next_frames,omitempty"`
+	CandidateHash        string                                 `json:"candidate_hash"`
+	DraftVersion         int                                    `json:"draft_version"`
+	EvidenceFingerprint  string                                 `json:"evidence_fingerprint"`
+	PolicyRevision       string                                 `json:"policy_revision"`
+	Scopes               []domain.ArticleReviewScope            `json:"scopes,omitempty"`
+	ReviewKeys           []string                               `json:"review_keys,omitempty"`
+	Issues               []domain.ArticleReviewIssue            `json:"issues,omitempty"`
+	Feedback             json.RawMessage                        `json:"feedback,omitempty"`
+	NoProgress           int                                    `json:"no_progress"`
+	BlockedCandidates    map[string][]domain.ArticleReviewIssue `json:"blocked_candidates,omitempty"`
+	Failures             map[string]int                         `json:"failures"`
+	OutputTokens         int                                    `json:"output_tokens"`
+	SourceChars          int                                    `json:"source_chars"`
+	ReviewReserve        int                                    `json:"review_reserve"`
+	ReviewSourceLimit    int                                    `json:"review_source_limit,omitempty"`
+	OutputSections       int                                    `json:"output_sections"`
+	InspectionKeys       []string                               `json:"inspection_keys,omitempty"`
+	ReviewRevision       string                                 `json:"review_revision,omitempty"`
+	ReviewCache          map[string]string                      `json:"review_cache,omitempty"`
+	RepairRounds         int                                    `json:"repair_rounds,omitempty"`
+	RepairActions        int                                    `json:"repair_actions,omitempty"`
+	ReviewWorkLimit      int                                    `json:"review_work_limit,omitempty"`
+	LimitedReviewContext bool                                   `json:"limited_review_context,omitempty"`
+	ReviewPlan           []domain.ArticleReviewScope            `json:"review_plan,omitempty"`
+	ReviewLatest         map[string]string                      `json:"review_latest,omitempty"`
+	ReviewBases          map[string]string                      `json:"review_bases,omitempty"`
+	Challenges           []loopReviewChallenge                  `json:"review_challenges,omitempty"`
+	ChallengeCandidate   string                                 `json:"challenge_candidate,omitempty"`
+	ReviewBaseKey        string                                 `json:"review_base_key,omitempty"`
 }
 type articleLoopCall struct {
 	Slot         int                        `json:"slot"`
@@ -131,7 +137,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 		}
 		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV3
+			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV4
 			s.cp.ArticleLoop.ReviewCache = map[string]string{}
 		}
 		s.cp.Protocol = s.cp.ExecutionContract.Version
@@ -431,6 +437,8 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			return false, e
 		}
 		if progress {
+			l.ChallengeCandidate = ""
+			l.Challenges = nil
 			l.CandidateHash = ""
 			l.Scopes = nil
 			l.ReviewKeys = nil
@@ -451,6 +459,16 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			}
 		}
 		return progress, nil
+	case loopChallengeTool:
+		var in loopChallengeInput
+		if !s.loopEvidenceReview() {
+			err = errors.New("review challenge unavailable")
+			break
+		}
+		if err = loopDecode(raw, &in); err != nil {
+			break
+		}
+		return s.challengeLoopReview(ctx, in)
 	case loopFinishTool:
 		var in loopFinishInput
 		if err = loopDecode(raw, &in); err != nil {
@@ -639,9 +657,9 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 		return false, err
 	}
 	hash := domain.ArticleHash(d.Article)
-	if blocking := l.BlockedCandidates[hash]; len(blocking) > 0 {
+	if blocking := l.BlockedCandidates[hash]; len(blocking) > 0 && !(s.loopEvidenceReview() && l.ChallengeCandidate == hash) {
 		l.Issues = blocking
-		l.Feedback = domain.JSON(map[string]any{"failure": "unchanged_blocking_candidate", "issues": blocking, "action": "The same candidate still has verified blocking issues; revise affected content instead of requesting the same review."})
+		l.Feedback = domain.JSON(map[string]any{"failure": "unchanged_blocking_candidate", "issues": blocking, "action": "The same candidate still has unresolved review findings; revise affected content instead of requesting the same review."})
 		return false, nil
 	}
 	if l.CandidateHash == hash && len(l.Scopes) > 0 {

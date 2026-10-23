@@ -11,10 +11,14 @@ import (
 
 func (s *session) loopReviewDelta(ctx context.Context, a domain.Article, scope domain.ArticleReviewScope) (*domain.ArticleReviewDelta, error) {
 	l := s.cp.ArticleLoop
-	if !s.loopDeltaReview() || l.ReviewBaseKey == "" || !domain.ArticleReviewCoversWhole(scope, a, s.transcript, store.ContentFrameIDs(a.Sections, a.Citations)) {
+	key := l.ReviewBaseKey
+	if s.loopEvidenceReview() {
+		key = l.ReviewBases[scope.ID]
+	}
+	if !s.loopDeltaReview() || key == "" || (!s.loopEvidenceReview() && !domain.ArticleReviewCoversWhole(scope, a, s.transcript, store.ContentFrameIDs(a.Sections, a.Citations))) {
 		return nil, nil
 	}
-	op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, l.ReviewBaseKey)
+	op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
 	if err != nil {
 		return nil, err
 	}
@@ -37,10 +41,13 @@ func (s *session) loopReviewDelta(ctx context.Context, a domain.Article, scope d
 	if json.Unmarshal(old.Result, &before) != nil || domain.ArticleHash(before) != parent.CandidateHash {
 		return nil, loopStop("INTERNAL_FAILURE", "综合核验原候选身份不一致")
 	}
-	if !domain.ArticleReviewCoversWhole(parent.Scope, before, s.transcript, store.ContentFrameIDs(before.Sections, before.Citations)) {
+	if !s.loopEvidenceReview() && !domain.ArticleReviewCoversWhole(parent.Scope, before, s.transcript, store.ContentFrameIDs(before.Sections, before.Citations)) {
 		return nil, nil
 	}
-	delta, ok := domain.ArticleReviewDeltaFor(l.ReviewBaseKey, parent, before, a)
+	delta, ok := domain.ArticleReviewDeltaFor(key, parent, before, a)
+	if s.loopEvidenceReview() {
+		delta, ok = domain.ArticleScopedReviewDeltaFor(key, parent, before, a, scope)
+	}
 	if !ok {
 		return nil, nil
 	}

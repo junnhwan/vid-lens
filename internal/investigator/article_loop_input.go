@@ -317,6 +317,15 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		if s.loopCompactReview() {
 			system = loopCompactReviewInstructions
 		}
+		if s.loopEvidenceReview() {
+			system += loopEvidenceReviewInstructions
+			payload["review_challenges"] = l.Challenges
+			_, prior, e := s.latestLoopReview(ctx, *p.Scope)
+			if e != nil {
+				return nil, e
+			}
+			payload["unresolved_findings"] = loopChallengeFindings(prior.Report.Issues)
+		}
 		if p.Delta != nil {
 			op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, p.Delta.ReviewKey)
 			if e != nil {
@@ -345,7 +354,11 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 				}
 			}
 			payload["prior_block_baselines"] = baselines
-			system += loopDeltaReviewInstructions
+			if s.loopEvidenceReview() {
+				system += loopEvidenceDeltaInstructions
+			} else {
+				system += loopDeltaReviewInstructions
+			}
 		}
 		payload["scope"] = p.Scope
 		if s.loopConvergence() && !s.loopCompactReview() {
@@ -448,6 +461,10 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	} else {
 		payload["feedback"] = l.Feedback
 		payload["blocking_issues"] = l.Issues
+		if s.loopEvidenceReview() {
+			payload["review_findings"] = loopChallengeFindings(l.Issues)
+			system += loopEvidenceAuthorInstructions
+		}
 		if s.loopConvergence() {
 			payload["repair_budget"] = map[string]any{"remaining_rounds": max(0, loopRepairRoundLimit-l.RepairRounds), "remaining_actions_this_round": max(0, loopRepairActionLimit-l.RepairActions), "instruction": "Prefer revise_blocks for existing blocks and scoped limitations. Correct all listed concrete defects together; preserve unrelated material. Saved wording alone does not reset the repair budget."}
 			var feedback map[string]any
@@ -779,6 +796,9 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 			return nil, loopStop("ARTICLE_BUDGET_EXHAUSTED", "来源与稿件需要的核验范围超过剩余预算")
 		}
 	}
+	if s.loopEvidenceReview() {
+		l.ReviewPlan = slices.Clone(l.Scopes)
+	}
 	return append([]domain.ArticleReviewScope{}, l.Scopes...), nil
 }
 func (s *session) splitLoopReview(ctx context.Context, scope domain.ArticleReviewScope) error {
@@ -791,6 +811,9 @@ func (s *session) splitLoopReview(ctx context.Context, scope domain.ArticleRevie
 func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	l := s.cp.ArticleLoop
 	scope := l.Scopes[index]
+	if s.loopEvidenceReview() && scope.Global && len(scope.SourceIDs) == 0 {
+		return loopStop("ARTICLE_CAPACITY_EXCEEDED", "当前全文关系核对无法拆成互不相见的局部批准")
+	}
 	left, right := scope, scope
 	switch {
 	case s.loopConvergence() && len(scope.SectionIDs) > 1:
@@ -850,7 +873,18 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 		}
 		before := s.loopScopeWork(draft.Article, scope)
 		if s.loopScopeWork(draft.Article, left) >= before || s.loopScopeWork(draft.Article, right) >= before {
-			return loopStop("ARTICLE_CAPACITY_EXCEEDED", "完整章节及其必需证据已无法有效缩小，不再重试相同核验工作量")
+			if s.loopEvidenceReview() && !l.LimitedReviewContext {
+				l.LimitedReviewContext = true
+				left = s.loopScopeContext(draft.Article, left)
+				right = s.loopScopeContext(draft.Article, right)
+				left.ID = ""
+				left.ID = store.Hash(left)[:24]
+				right.ID = ""
+				right.ID = store.Hash(right)[:24]
+			}
+			if s.loopScopeWork(draft.Article, left) >= before || s.loopScopeWork(draft.Article, right) >= before {
+				return loopStop("ARTICLE_CAPACITY_EXCEEDED", "完整章节及其必需证据已无法有效缩小，不再重试相同核验工作量")
+			}
 		}
 	}
 	next := append([]domain.ArticleReviewScope{}, l.Scopes[:index]...)
@@ -862,6 +896,18 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 		next = append(next, global)
 	}
 	l.Scopes = next
+	if s.loopEvidenceReview() {
+		plan := l.ReviewPlan
+		idx := slices.IndexFunc(plan, func(v domain.ArticleReviewScope) bool { return v.ID == scope.ID })
+		if idx >= 0 {
+			plan = slices.Delete(slices.Clone(plan), idx, idx+1)
+			plan = append(plan, left, right)
+			if scope.Global {
+				plan = append(plan, next[len(next)-1])
+			}
+			l.ReviewPlan = plan
+		}
+	}
 	if len(next) > l.Budget.Calls-s.cp.Calls {
 		return loopStop("ARTICLE_BUDGET_EXHAUSTED", "拆分后的完整核验无法在冻结预算内完成")
 	}
@@ -1107,11 +1153,25 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if len(deltas) > 0 {
 		delta = deltas[0]
 	}
-	if err == nil {
+	if err == nil && !s.loopEvidenceReview() {
 		err = validateLoopDeltaReport(report, delta)
+	}
+	if err == nil && s.loopEvidenceReview() {
+		err = domain.ValidateArticleReviewQuotes(report, scope, s.transcript)
+		if err == nil {
+			err = requireNewFindingEvidence(report, delta)
+		}
 	}
 	if err == nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		err = domain.ValidateArticleVisualObservations(observations, scope)
+	}
+	var prior domain.ArticleReviewRecord
+	var priorKey string
+	if err == nil && s.loopEvidenceReview() {
+		priorKey, prior, err = s.latestLoopReview(ctx, scope)
+		if err == nil {
+			err = domain.ValidateArticleReviewResolutions(report, prior, l.CandidateHash, scope, s.transcript)
+		}
 	}
 	if err != nil {
 		l.Feedback = loopReviewFailureFeedback(err, raw)
@@ -1128,6 +1188,10 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		return false, loopStop("ARTICLE_EVIDENCE_CHANGED", "核验中的证据已变化")
 	}
 	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations, Delta: delta}
+	if priorKey != "" {
+		record.ReconcilesReviewKey = priorKey
+		record.ReconcilesReviewHash = domain.ContentHash(prior)
+	}
 	if s.loopConvergence() {
 		record.MaterialHash, e = s.loopMaterialHash(ctx, d.Article, scope)
 		if e != nil {
@@ -1135,15 +1199,30 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		}
 	}
 	key := "article-loop:review:" + store.Hash(map[string]any{"candidate": l.CandidateHash, "evidence": fingerprint, "scope": scope.ID})
+	if s.loopEvidenceReview() {
+		key += fmt.Sprintf(":%d", s.cp.Calls)
+	}
 	if e = s.loopSave(ctx, key, "article_loop_review", record); e != nil {
 		return false, e
 	}
 	if s.loopDeltaReview() && l.ReviewBaseKey == "" && delta == nil && domain.ArticleReviewCoversWhole(scope, d.Article, s.transcript, store.ContentFrameIDs(d.Article.Sections, d.Article.Citations)) {
 		l.ReviewBaseKey = key
 	}
+	if s.loopEvidenceReview() {
+		if l.ReviewLatest == nil {
+			l.ReviewLatest = map[string]string{}
+		}
+		l.ReviewLatest[scope.ID] = key
+	}
+	if s.loopEvidenceReview() && delta == nil && record.ReusedFrom == "" {
+		if l.ReviewBases == nil {
+			l.ReviewBases = map[string]string{}
+		}
+		l.ReviewBases[scope.ID] = key
+	}
 	l.ReviewKeys = appendUnique(l.ReviewKeys, key)
 	l.Feedback = nil
-	if s.loopConvergence() && !scope.Global && !loopBlocking(report.Issues) {
+	if s.loopConvergence() && !scope.Global && delta == nil && !loopBlocking(report.Issues) {
 		if l.ReviewCache == nil {
 			l.ReviewCache = map[string]string{}
 		}
@@ -1156,7 +1235,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	l.Scopes = slices.DeleteFunc(l.Scopes, func(v domain.ArticleReviewScope) bool { return v.ID == scope.ID })
 	if len(l.Scopes) > 0 {
 		if s.loopConvergence() && loopBlocking(l.Issues) && len(l.Scopes) == 1 && l.Scopes[0].Global && len(l.Scopes[0].SourceIDs) == 0 {
-			// 先修正已经确认的问题，避免给明知有缺陷的稿件额外做全文关系核对。
+			// 先处理待核实的问题，避免给明知有缺陷的稿件额外做全文关系核对。
 			l.Scopes = nil
 		} else {
 			return true, nil
@@ -1169,6 +1248,8 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		}
 	}
 	if len(blocking) > 0 {
+		l.ChallengeCandidate = ""
+		l.Challenges = nil
 		if s.loopConvergence() {
 			l.RepairRounds++
 			l.RepairActions = 0
@@ -1186,7 +1267,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		}
 		l.CandidateHash = ""
 		l.Issues = blocking
-		l.Feedback = domain.JSON(map[string]any{"action": "Revise the affected content using these blocking issues. Prior approval is invalid; unaffected chapters remain saved.", "issues": blocking})
+		l.Feedback = domain.JSON(map[string]any{"action": "Verify each review finding against the originals before changing content. Repair genuine defects only. Preserve correct facts and unrelated chapters. Review findings are not human-confirmed facts.", "issues": blocking})
 		return true, nil
 	}
 	approval := domain.ArticleApproval{CandidateHash: l.CandidateHash, EvidenceFingerprint: l.EvidenceFingerprint, PolicyRevision: l.PolicyRevision, DraftVersion: l.DraftVersion, ReviewKeys: append([]string{}, l.ReviewKeys...)}
