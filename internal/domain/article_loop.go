@@ -99,6 +99,7 @@ type ArticleReviewRecord struct {
 	Scope                ArticleReviewScope         `json:"scope"`
 	Report               ArticleReviewReport        `json:"report"`
 	VisualObservations   []ArticleVisualObservation `json:"visual_observations,omitempty"`
+	QuoteBindings        []ArticleQuoteBinding      `json:"quote_bindings,omitempty"`
 	MaterialHash         string                     `json:"material_hash,omitempty"`
 	ReusedFrom           string                     `json:"reused_from,omitempty"`
 	ReuseKind            string                     `json:"reuse_kind,omitempty"`

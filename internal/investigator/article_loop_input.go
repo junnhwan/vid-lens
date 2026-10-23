@@ -1135,6 +1135,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	l := s.cp.ArticleLoop
 	var report domain.ArticleReviewReport
 	var observations []domain.ArticleVisualObservation
+	var quoteBindings []domain.ArticleQuoteBinding
 	var err error
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		var grounded domain.ArticleGroundedReviewReport
@@ -1170,7 +1171,10 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 		err = validateLoopDeltaReport(report, delta)
 	}
 	if err == nil && s.loopEvidenceReview() {
-		err = domain.ValidateArticleReviewQuotes(report, scope, s.transcript)
+		report, quoteBindings, err = domain.BindArticleReviewQuotes(report, scope, s.transcript)
+		if err == nil {
+			err = domain.ValidateArticleReviewQuotes(report, scope, s.transcript)
+		}
 		if err == nil {
 			err = requireNewFindingEvidence(report, delta)
 		}
@@ -1200,7 +1204,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if fingerprint != l.EvidenceFingerprint {
 		return false, loopStop("ARTICLE_EVIDENCE_CHANGED", "核验中的证据已变化")
 	}
-	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations, Delta: delta}
+	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations, QuoteBindings: quoteBindings, Delta: delta}
 	if priorKey != "" {
 		record.ReconcilesReviewKey = priorKey
 		record.ReconcilesReviewHash = domain.ContentHash(prior)

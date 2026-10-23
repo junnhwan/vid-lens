@@ -147,6 +147,9 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 		if cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV4 && domain.ValidateArticleReviewQuotes(record.Report, record.Scope, transcript) != nil {
 			return articleLoopGateError()
 		}
+		if cp.Loop.ReviewRevision == domain.ArticleConvergenceReviewV4 && record.ReusedFrom == "" && domain.ValidateArticleQuoteBindings(record.Report, record.QuoteBindings, record.Scope, transcript) != nil {
+			return articleLoopGateError()
+		}
 		if domain.ArticleConvergenceReview(cp.Loop.ReviewRevision) {
 			if record.ReusedFrom == "" && record.ReuseKind != "" {
 				return articleLoopGateError()

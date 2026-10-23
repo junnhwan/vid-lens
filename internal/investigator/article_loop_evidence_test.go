@@ -27,6 +27,11 @@ func TestArticleLoopEvidenceChallengeRequiresIndependentWithdrawal(t *testing.T)
 					if n == 1 || !withdraw {
 						report.Issues = []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC03", Location: a.Sections[0].Blocks[0].ID, EvidenceIDs: []string{"t1"}, Problem: "待核实的合成意见", Correction: "对照原文确认"}}
 					}
+					if n == 1 {
+						// A real passage with a mistaken alias is bound by the program,
+						// while the finding still needs independent semantic withdrawal.
+						report.Issues[0].EvidenceQuotes = []domain.ArticleEvidenceQuote{{SourceID: "t2", Quote: s.transcript[0].Text}}
+					}
 					if n == 2 && (p["review_challenges"] == nil || p["revision_delta"] == nil) {
 						t.Error("independent reviewer did not receive dispute and exact baseline")
 					}
