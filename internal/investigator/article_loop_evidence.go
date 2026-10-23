@@ -22,8 +22,20 @@ type loopChallengeInput struct {
 }
 
 func (s *session) loopEvidenceReview() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV4
+	return s.cp.ArticleLoop != nil && domain.ArticleEvidenceReview(s.cp.ArticleLoop.ReviewRevision)
 }
+
+func (s *session) loopEditorialReview() bool {
+	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV5
+}
+
+const loopEditorialReviewInstructions = `
+区分出处支持与编排偏好：逐字引语匹配原文、绑定正确，且没有被错误归因或用来支持不成立的主张时，仅因它位于另一主题章节、缺少过渡句或你偏好另一位置，不构成AC04 blocking；可提出AC06 advisory。若编排确实造成错误含义、矛盾或无法独立理解，指出具体被误导的主张与上下文，按相应AC报告实质缺陷；不能仅以“读者可能误会”代替证明。
+修正建议须检查全文已有覆盖：挪动或删除引语前，对照当前候选是否已完整保留该事实、条件和必要细节。删除有重复表达的装饰引语可以成立，不强求逐字重复；删掉唯一必要信息则属于AC02。此边界不撤销既有阻断，unresolved_findings仍须逐条独立裁决。`
+
+const loopExclusivePatchInstructions = `
+同一行动中replacements与remove_block_ids互斥：同一个block_id只能替换一次或删除一次，不能同时出现；删除不是移动，不能用同ID替换加删除来移动块。冗余内容仅在全文已有实质覆盖时删除；确需搬移唯一信息时，用save_sections在一次原子行动中完整替换受影响章节，保留全部必要正文和sources。冲突会整次拒绝，不会部分保存。`
+
 func loopChallengeFindings(issues []domain.ArticleReviewIssue) []any {
 	out := []any{}
 	for _, issue := range issues {

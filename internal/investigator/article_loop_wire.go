@@ -301,6 +301,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		if v2 && info.Name == loopSaveTool {
 			info.Desc += " 可在一次原子修订中修改正文、删除和排序；组合行动任一部分无效则整次不保存。order必须包含操作后所有保留章节ID，不能遗漏未修改章节；同一章不能同时替换和删除。"
 		}
+		if s.loopEditorialReview() && info.Name == loopPatchTool {
+			info.Desc += loopExclusivePatchInstructions
+		}
 		if info.Name == loopSaveTool || v2 {
 			// The semantic input type owns the shape; the canonical domain owns
 			// the accepted limitation vocabulary. Publish that same vocabulary

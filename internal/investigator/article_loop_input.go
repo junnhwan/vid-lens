@@ -308,6 +308,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	if s.loopConvergence() && p.Mode == "author" {
 		system += "\n修正已有段落优先使用revise_blocks：replacements每项提供canonical_locations中的真实block_id及完整content对象（只选一个语义构造并保留实际sources）；remove_block_ids只删除明确冗余块；section_limitations按真实section_id更新该章完整局限，[]表示删除过时局限。未改正文由程序保留，不必重发整章。一次修正全部具体阻断，finish=true请求核验；保存新措辞不会重置修订额度。新增章节仍用save_sections，其order可以直接使用同一行动中的新建key，程序原子解析，勿编造稳定ID。"
 	}
+	if s.loopEditorialReview() && p.Mode == "author" {
+		system += loopExclusivePatchInstructions
+	}
 	if p.Mode == "review" {
 		system = loopReviewInstructions
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
@@ -319,6 +322,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		}
 		if s.loopEvidenceReview() {
 			system += loopEvidenceReviewInstructions
+			if s.loopEditorialReview() {
+				system += loopEditorialReviewInstructions
+			}
 			payload["review_challenges"] = l.Challenges
 			_, prior, e := s.latestLoopReview(ctx, *p.Scope)
 			if e != nil {

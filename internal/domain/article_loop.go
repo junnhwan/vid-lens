@@ -15,9 +15,15 @@ const ArticleConvergenceReviewV2 = "integrated-convergence-2026-10-23-v2"
 const ArticleConvergenceReviewV3 = "delta-convergence-2026-10-23-v3"
 
 const ArticleConvergenceReviewV4 = "evidence-convergence-2026-10-23-v4"
+const ArticleConvergenceReviewV5 = "editorial-boundary-2026-10-23-v5"
 
 func ArticleConvergenceReview(revision string) bool {
-	return revision == ArticleConvergenceReviewV1 || revision == ArticleConvergenceReviewV2 || revision == ArticleConvergenceReviewV3 || revision == ArticleConvergenceReviewV4
+	return revision == ArticleConvergenceReviewV1 || revision == ArticleConvergenceReviewV2 || revision == ArticleConvergenceReviewV3 || ArticleEvidenceReview(revision)
+}
+
+// Later guidance revisions retain every evidence and reconciliation gate.
+func ArticleEvidenceReview(revision string) bool {
+	return revision == ArticleConvergenceReviewV4 || revision == ArticleConvergenceReviewV5
 }
 
 // These identities are owned by the program, never accepted from author tools.
