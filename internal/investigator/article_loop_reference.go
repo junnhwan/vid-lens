@@ -208,6 +208,9 @@ func (s *session) loopCallTools(p articleLoopCall) ([]*schema.ToolInfo, error) {
 			completeSources = completeSources && slices.Contains(p.Sources, ref)
 		}
 		return slices.DeleteFunc(infos, func(info *schema.ToolInfo) bool {
+			if s.deliveryVisuals() && info.Name == "view_frames" && (len(s.cp.ArticleLoop.Visual.StandaloneSlots) >= deliveryVisualStandalone || s.cp.ArticleLoop.Visual.PixelsClosed || p.OptionalVisualAllowed != nil && !*p.OptionalVisualAllowed) {
+				return true
+			}
 			if s.deliveryAdvisoryQuality() {
 				return info.Name == "read_article_state" && len(p.Sections) == 0 || info.Name == "read_evidence" && (completeSources || s.deliverySourcesRead())
 			}

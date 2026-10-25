@@ -38,6 +38,8 @@ const loopFaithfulReviewInstructions = `来源忠实按完整上下文的含义�
 
 const loopExtraWindowLimit = 2
 
+var errOptionalVisualPixels = errors.New("optional visual pixels unavailable")
+
 const loopArticleFirstInstructions = `正文优先，配图按信息价值选择，没有最低配图数量。优先使用能补充邻近正文的清晰板书、课件、图表、代码或实际操作画面；有人物不等于无价值，但只有人物、访谈分屏或装饰性场景不能当作解释配图。不要为了标识讲者、章节气氛或凑数量放人像。
 先判断已交付概览。原文能支撑完整文章而没有合适图时，直接以少图或无图完成；不需要为了无图额外调用模型、补免责声明或停止任务。旧稿若因少量概览写下“全片没有板书/图表/演示”之类无法证明的全片否定，删除该断言即可，不必继续取帧证明其不存在。只有来源指出具体屏幕材料或必要视觉问题时才定点view_frames，不做盲目均匀抽帧反复找图；概览之后最多两个新窗口，每次最多六帧。仍无可读材料就停止找图，继续正文与核验。确实依赖画面才能证明的关键内容仍需证据，不能用旁白编造画面或删掉必含事实。
 复核同样接受无图文章，不得仅因缺少配图提出blocking或要求补图。无关人像或装饰图应直接删除，保留有原文依据的正文与引用，无需强制替换；只有实际使用的视觉断言需要像素核验。`
@@ -66,7 +68,13 @@ func (s *session) loopAllSourceAliases() []string {
 }
 func (s *session) prepareLoopFrames(ctx context.Context) error {
 	l := s.cp.ArticleLoop
+	if s.deliveryVisuals() && l.Visual.OverviewDone {
+		return nil
+	}
 	if len(l.Frames) > 0 {
+		if s.deliveryVisuals() {
+			l.Visual.OverviewDone = true
+		}
 		return nil
 	}
 	existing, err := s.engine.Store.RunFrames(ctx, s.claim.Run.ID)
@@ -93,6 +101,13 @@ func (s *session) prepareLoopFrames(ctx context.Context) error {
 	}
 	for i := 0; i < bins; i++ {
 		t := s.snapshot.DurationMS * int64(2*i+1) / int64(2*bins)
+		if s.deliveryVisuals() {
+			_, err := s.captureDeliveryVisual(ctx, fmt.Sprint("overview:", i), deliveryVisualRequest{Key: fmt.Sprint("overview:", i), Question: "取得用于理解视频的实际候选画面", StartMS: max(int64(0), t-1), EndMS: min(s.snapshot.DurationMS, t+1)}, true)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		out, e := s.engine.Media.Inspect(ctx, s.claim, fmt.Sprint("article-loop:overview:", i), "取得用于理解视频的实际候选画面", media.Window{StartMS: max(int64(0), t-1), EndMS: min(s.snapshot.DurationMS, t+1), Count: 1, Mode: "overview"}, nil)
 		if e != nil {
 			return e
@@ -100,6 +115,9 @@ func (s *session) prepareLoopFrames(ctx context.Context) error {
 		for _, id := range out.FrameIDs {
 			l.Frames = appendUnique(l.Frames, id)
 		}
+	}
+	if s.deliveryVisuals() {
+		l.Visual.OverviewDone = true
 	}
 	return nil
 }
@@ -286,8 +304,30 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 		}
 		p.Frames = append([]string{}, l.NextFrames...)
 		if len(p.Frames) == 0 && !s.deliveryRecovering() {
-			p.Frames = append([]string{}, l.Frames[:min(4, len(l.Frames))]...)
+			if s.deliveryVisuals() {
+				for _, id := range l.Frames {
+					if !slices.Contains(l.SeenFrames, id) {
+						p.Frames = append(p.Frames, id)
+					}
+				}
+			} else {
+				p.Frames = append([]string{}, l.Frames[:min(4, len(l.Frames))]...)
+			}
 		}
+	}
+	if s.deliveryVisuals() && mode == "author" {
+		if err := s.deliveryVisualFramesForCall(ctx, p); err != nil {
+			return nil, nil, nil, err
+		}
+		_, draft, err := s.loadLoopDraft(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allowance, err := s.deliveryVisualAllowance(ctx, draft.Article)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		p.OptionalVisualAllowed = domain.Ptr(allowance.Allowed)
 	}
 	s.articleCall = p
 	defer func() { s.articleCall = nil }()
@@ -300,6 +340,16 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 		}
 		input, e := s.loopInput(ctx, *p)
 		if e != nil {
+			if s.deliveryVisuals() && len(p.Frames) > 0 && errors.Is(e, errOptionalVisualPixels) {
+				if ctx.Err() != nil {
+					return nil, nil, nil, ctx.Err()
+				}
+				if check := s.engine.Store.Check(ctx, s.claim); check != nil {
+					return nil, nil, nil, check
+				}
+				p.Frames = nil
+				continue
+			}
 			return nil, nil, nil, e
 		}
 		bound, e := (&meteredModel{session: s}).WithTools(infos)
@@ -341,6 +391,10 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 		}
 		// Narrow only the delivered workspace, never the immutable transcript or
 		// unread obligation. All omitted ranges stay visible in remaining_sources.
+		if s.deliveryVisuals() && len(p.Frames) > 0 {
+			p.Frames = p.Frames[:len(p.Frames)/2]
+			continue
+		}
 		if len(p.Sections) > 1 {
 			p.Sections = p.Sections[:len(p.Sections)/2]
 			continue
@@ -407,6 +461,14 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && p.Mode == "author" {
 		payload["visual_budget"] = map[string]any{"new_windows_remaining": max(0, loopExtraWindowLimit-len(l.InspectionKeys)), "minimum_figures": 0, "instruction": "Prefer complete supported prose. No useful illustration is a valid outcome; do not spend calls searching for decorative images."}
+		if s.deliveryVisuals() {
+			allowance, err := s.deliveryVisualAllowance(ctx, d.Article)
+			if err != nil {
+				return nil, err
+			}
+			payload["visual_budget"] = map[string]any{"allowance": allowance, "minimum_figures": 0, "maximum_standalone_calls": deliveryVisualStandalone, "maximum_refinements_per_goal": 1, "maximum_physical_image_inputs": deliveryVisualImages, "maximum_estimated_image_tokens": deliveryVisualTokens, "maximum_image_bytes": deliveryVisualBytes, "instruction": "Optional screenshots share total sends/time with prose. Save prose first; prefer visual_requests in the same save. When disabled, omit the image and finish the complete article."}
+			payload["visual_requests"] = l.Visual.Records
+		}
 		payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls-max(1, l.ReviewReserve)), "review_calls_reserved": max(1, l.ReviewReserve), "instruction": "Use finish=true with your final complete save_sections action so the independent review fits the remaining budget; a separate finish_article consumes another author call. Do not request finish while required content is missing."}
 		if s.deliveryFirst() {
 			payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls), "review_calls_reserved": 0, "instruction": "Save a small batch of complete chapters per action. Use finish=true only when the complete article, including the final source range, is saved. Delivery does not wait for semantic review."}
@@ -819,6 +881,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	if s.deliveryFirst() && p.Mode == "author" {
 		system = deliveryAuthorInstructions + "\n" + loopArticleFirstInstructions
+		if s.deliveryVisuals() {
+			system = deliveryAuthorInstructions + "\n" + deliveryVisualInstructions
+		}
 		if s.deliveryNavigation() {
 			system += "\n" + deliveryNavigationInstructions
 		}
@@ -857,6 +922,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	if len(p.Frames) > 0 {
 		parts, e := s.imageInput(ctx, p.Frames, fmt.Sprint("article-loop:", p.Slot))
 		if e != nil {
+			if s.deliveryVisuals() && p.Mode == "author" {
+				return nil, fmt.Errorf("%w: %v", errOptionalVisualPixels, e)
+			}
 			return nil, e
 		}
 		for _, part := range parts {

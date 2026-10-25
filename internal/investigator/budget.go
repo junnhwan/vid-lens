@@ -18,6 +18,7 @@ type callBudget struct {
 	EstimatedTextTokens    int    `json:"estimated_text_tokens"`
 	EstimatedImageTokens   int    `json:"estimated_image_tokens"`
 	ImageCount             int    `json:"image_count"`
+	ImageBytes             int64  `json:"image_bytes,omitempty"`
 	OutputTokens           int    `json:"output_tokens"`
 	SafetyTokens           int    `json:"safety_tokens"`
 	ContextTokens          int    `json:"context_tokens,omitempty"`
@@ -48,6 +49,14 @@ func estimateTextTokens(raw []byte) int {
 		}
 	}
 	return (ascii+2)/3 + other*2
+}
+
+func estimateImageTokens(a domain.Asset) int {
+	pixels := float64(1920 * 1080)
+	if a.Width > 0 && a.Height > 0 {
+		pixels = float64(a.Width) * float64(a.Height)
+	}
+	return 512 + int(math.Ceil(pixels/1000000))*4096
 }
 func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars int) (callBudget, error) {
 	raw := domain.JSON(stripPixels(in))
@@ -98,12 +107,9 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			if err != nil {
 				return b, err
 			}
-			pixels := float64(1920 * 1080)
-			if a.Width > 0 && a.Height > 0 {
-				pixels = float64(a.Width) * float64(a.Height)
-			}
-			b.EstimatedImageTokens += 512 + int(math.Ceil(pixels/1000000))*4096
+			b.EstimatedImageTokens += estimateImageTokens(a)
 			b.ImageCount++
+			b.ImageBytes += a.Bytes
 		}
 	}
 	if s.authoring() && b.Phase == "compose" && !s.boundedSourceContext() {

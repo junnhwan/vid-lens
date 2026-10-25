@@ -374,6 +374,17 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 					return submitErr
 				}
 			}
+			if s.deliveryVisuals() && budget.ImageCount > 0 {
+				usage, e := s.engine.Store.ArticleVisualUsage(actx, s.claim.Run.ID)
+				if e != nil {
+					submitErr = e
+					return e
+				}
+				if usage.Images+budget.ImageCount > deliveryVisualImages || usage.EstimatedTokens+int64(budget.EstimatedImageTokens) > deliveryVisualTokens || usage.Bytes+budget.ImageBytes > deliveryVisualBytes {
+					submitErr = &domain.WorkError{Code: "ARTICLE_VISUAL_BUDGET_EXHAUSTED", Message: "可选图片输入已达上限，继续正文。"}
+					return submitErr
+				}
+			}
 			reserved, err := s.engine.Store.BeginModelSubmission(actx, s.claim, key, args, route.ConfigID)
 			submission, submitErr = reserved.Submissions, err
 			if err == nil && s.policy().Enabled {

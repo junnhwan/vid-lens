@@ -11,6 +11,18 @@ type ModelExecutionStats struct {
 	ResponseMS  int64 `json:"response_ms"`
 }
 
+type ArticleVisualUsage struct {
+	Images          int   `json:"images"`
+	EstimatedTokens int64 `json:"estimated_tokens"`
+	Bytes           int64 `json:"bytes"`
+}
+
+// Count every physical send, including retries and unknown responses. Image
+// token estimates are a resource guard, never a claim about billed cost.
+func (s *Store) ArticleVisualUsage(ctx context.Context, run string) (ArticleVisualUsage, error) {
+	return one[ArticleVisualUsage](ctx, s.Pool, `SELECT jsonb_build_object('images',COALESCE(sum((reporting->'budget'->>'image_count')::int),0),'estimated_tokens',COALESCE(sum((reporting->'budget'->>'estimated_image_tokens')::bigint),0),'bytes',COALESCE(sum((reporting->'budget'->>'image_bytes')::bigint),0)) FROM model_submissions WHERE run_id=$1`, run)
+}
+
 // Aggregate transport observations, including incomplete responses. These are
 // persisted independently of the worker checkpoint and never reset on takeover.
 func (s *Store) ModelExecution(ctx context.Context, run string) (ModelExecutionStats, error) {

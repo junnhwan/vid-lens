@@ -17,10 +17,14 @@ const ArticleDeliveryV4 = "delivery-first-2026-10-25-v4"
 // V5 bounds recovery after malformed author JSON without dropping the saved
 // draft or reusing a damaged response as the next writing template.
 const ArticleDeliveryV5 = "delivery-first-2026-10-25-v5"
-const CurrentArticleDelivery = ArticleDeliveryV5
+
+// V6 integrates optional visual requests into chapter saves, with durable
+// capture/refinement limits and prose reserves. Older runs keep their wire.
+const ArticleDeliveryV6 = "delivery-first-2026-10-25-v6"
+const CurrentArticleDelivery = ArticleDeliveryV6
 
 func ArticleDeliveryPolicy(revision string) bool {
-	return revision == ArticleDeliveryV1 || revision == ArticleDeliveryV2 || revision == ArticleDeliveryV3 || revision == ArticleDeliveryV4 || revision == ArticleDeliveryV5
+	return revision == ArticleDeliveryV1 || revision == ArticleDeliveryV2 || revision == ArticleDeliveryV3 || revision == ArticleDeliveryV4 || revision == ArticleDeliveryV5 || revision == ArticleDeliveryV6
 }
 
 type ArticleAdvice struct {

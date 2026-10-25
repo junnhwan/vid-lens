@@ -7,6 +7,19 @@ import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("shows AI screenshot and refinement headings as separate actions with their outcomes", () => {
+    const actions = [
+      { ...step("capture", "tool_execution", 1), title: "按需取帧：查看邮件分类结果", outcome: { message: "已取得2张候选画面，继续写作与选图。", evidence_status: "not_assessed" } },
+      { ...step("refine", "tool_execution", 1), title: "微调取帧：向后微调至结果出现", source_range: { start_ms: 12000, end_ms: 18000 } },
+      { ...step("skip", "tool_execution", 1), title: "略过取帧：查看最终处理结果", outcome: { message: "剩余调用与时间优先用于完成正文，本次略过可选截图。", evidence_status: "not_assessed" } },
+    ]
+    expect(activityGroups(actions)).toHaveLength(3)
+    const html = renderToStaticMarkup(<ActivityList steps={actions} open detailed resourceStatus="generating" onOpenFrame={() => {}} onBroken={() => {}} />)
+    for (const action of actions) expect(html).toContain(action.title)
+    expect(html).toContain("已取得2张候选画面")
+    expect(html).toContain("优先用于完成正文")
+    expect(html.match(/role="listitem"/g)).toHaveLength(3)
+  })
   it("collects one model call's consecutive observation saves into one expandable row", () => {
     const observations = Array.from({ length: 4 }, (_, index) => ({
       ...step(`observation-${index}`, "tool_execution", 1), phase: "investigate", title: "保存视频画面观察",

@@ -9,15 +9,15 @@ import (
 )
 
 func (s *session) deliveryNavigation() bool {
-	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV3 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV4 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5)
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV3 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV4 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5 || s.deliveryVisuals())
 }
 
 func (s *session) deliveryAdvisoryQuality() bool {
-	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV4 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5)
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV4 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5 || s.deliveryVisuals())
 }
 
 func (s *session) deliveryRecovering() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5 && s.cp.ArticleLoop.Failures["author_envelope"] > 0
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV5 || s.deliveryVisuals()) && s.cp.ArticleLoop.Failures["author_envelope"] > 0
 }
 
 func (s *session) deliverySourcesRead() bool {

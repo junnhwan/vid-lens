@@ -95,12 +95,15 @@ func (s *loopSection) UnmarshalJSON(raw []byte) error {
 }
 
 type loopSaveInput struct {
-	Finish          bool          `json:"finish,omitempty" jsonschema:"description=After this write, request candidate review if all chapters were accepted and source coverage is complete"`
-	ExpectedVersion int           `json:"expected_version"`
-	Title           *string       `json:"title,omitempty"`
-	Sections        []loopSection `json:"sections" jsonschema:"maxItems=40,description=At most 40 chapters and 128 KiB for the complete write action; obey the smaller current_call section/output limit, split complete actions when needed"`
-	DeleteIDs       []string      `json:"delete_ids,omitempty"`
-	Order           []string      `json:"order,omitempty" jsonschema:"description=Atomic reorder: every retained stable section_id exactly once; separate from section writes"`
+	Finish            bool                      `json:"finish,omitempty" jsonschema:"description=After this write, request candidate review if all chapters were accepted and source coverage is complete"`
+	ExpectedVersion   int                       `json:"expected_version"`
+	Title             *string                   `json:"title,omitempty"`
+	Sections          []loopSection             `json:"sections" jsonschema:"maxItems=40,description=At most 40 chapters and 128 KiB for the complete write action; obey the smaller current_call section/output limit, split complete actions when needed"`
+	DeleteIDs         []string                  `json:"delete_ids,omitempty"`
+	Order             []string                  `json:"order,omitempty" jsonschema:"description=Atomic reorder: every retained stable section_id exactly once; separate from section writes"`
+	VisualRequests    []deliveryVisualRequest   `json:"visual_requests,omitempty" jsonschema:"maxItems=2,description=Optional targeted screenshots to prepare AFTER saving prose; never required for finish"`
+	FigurePlacements  []deliveryFigurePlacement `json:"figure_placements,omitempty" jsonschema:"maxItems=6,description=Insert observed figures into existing chapters without resending their prose"`
+	visualParseIssues []string
 }
 type loopStateInput struct {
 	SectionIDs []string `json:"section_ids,omitempty" jsonschema:"description=Optional existing section IDs to read in full; empty uses the current evidence workspace"`
@@ -118,17 +121,21 @@ type loopReadInput struct {
 	Query     string   `json:"query,omitempty"`
 }
 type loopViewInput struct {
-	FrameIDs []string     `json:"frame_ids" jsonschema:"description=Existing fN aliases; empty requests a new bounded window"`
-	Question string       `json:"question"`
-	StartMS  int64        `json:"start_ms,omitempty" jsonschema:"minimum=0,description=New window start within the source; use no window when reloading frame_ids"`
-	EndMS    int64        `json:"end_ms,omitempty" jsonschema:"minimum=1,description=New window end within source duration; 0 < end_ms - start_ms <= 60000 milliseconds"`
-	Count    int          `json:"count,omitempty" jsonschema:"minimum=1,maximum=6,description=1 to 6 actual frames; omitted defaults to 4"`
-	Crop     *domain.Crop `json:"crop,omitempty"`
+	FrameIDs      []string     `json:"frame_ids" jsonschema:"description=Existing fN aliases; empty requests a new bounded window"`
+	Question      string       `json:"question"`
+	StartMS       int64        `json:"start_ms,omitempty" jsonschema:"minimum=0,description=New window start within the source; use no window when reloading frame_ids"`
+	EndMS         int64        `json:"end_ms,omitempty" jsonschema:"minimum=1,description=New window end within source duration; 0 < end_ms - start_ms <= 60000 milliseconds"`
+	Count         int          `json:"count,omitempty" jsonschema:"minimum=1,maximum=6,description=1 to 6 actual frames; omitted defaults to 4"`
+	Crop          *domain.Crop `json:"crop,omitempty"`
+	RefineFrom    string       `json:"refine_from,omitempty" jsonschema:"description=Delivered fN alias for one local timeline refinement; keep within 15 seconds of this frame"`
+	Detail        bool         `json:"detail,omitempty" jsonschema:"description=Read a fresh higher-resolution frame from the original video when small text matters"`
+	activityTitle string
 }
 type loopReceipt struct {
-	Accepted []string          `json:"accepted"`
-	Created  map[string]string `json:"created"`
-	Rejected []loopRejection   `json:"rejected"`
+	Accepted        []string          `json:"accepted"`
+	Created         map[string]string `json:"created"`
+	Rejected        []loopRejection   `json:"rejected"`
+	FigureOmissions []string          `json:"figure_omissions,omitempty"`
 }
 type loopRejection struct {
 	Path   string `json:"path"`
@@ -304,7 +311,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		if v2 && info.Name == "stop_article" {
 			info.Desc = "关键内容确实缺少证据、无法忠实成文时停止并保留成果。缺少可用解释配图不构成停止原因，允许少图或无图完成文章。"
 		}
-		if v2 && info.Name == "view_frames" {
+		if s.deliveryVisuals() && info.Name == "view_frames" {
+			info.Desc = "可选地重看1–3张已有图，或为具体目标取附近3帧；优先在保存正文时顺带visual_requests。refine_from最多微调一次；detail从原视频重取。额外独立查看最多3次，预算不足继续正文。"
+		} else if v2 && info.Name == "view_frames" {
 			info.Desc += " 概览之后最多两个新窗口；只为具体来源线索或必要视觉问题取帧，不盲目找配图。无有用画面时继续正文，允许无图完成。"
 		}
 		if v2 && info.Name == loopSaveTool {
@@ -324,6 +333,28 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			var root map[string]any
 			if err = json.Unmarshal(domain.JSON(sc), &root); err != nil {
 				return nil, err
+			}
+			if !s.deliveryVisuals() {
+				props, _ := root["properties"].(map[string]any)
+				if info.Name == loopSaveTool {
+					delete(props, "visual_requests")
+					delete(props, "figure_placements")
+				}
+				if info.Name == "view_frames" {
+					delete(props, "refine_from")
+					delete(props, "detail")
+				}
+			}
+			if s.deliveryVisuals() && info.Name == loopSaveTool {
+				info.Desc += " 候选count为1–3，detail默认只取1帧以节省图片输入。"
+				info.Desc += " 正文先保存，再执行可选visual_requests；figure_placements可直接插图而不重发旧章。finish=true直接交付，不再找图。"
+			}
+			if s.deliveryVisuals() && info.Name == "view_frames" {
+				props, _ := root["properties"].(map[string]any)
+				if count, ok := props["count"].(map[string]any); ok {
+					count["maximum"] = 3
+					count["description"] = "1 to 3 actual candidates; default 3, or 1 for detail"
+				}
 			}
 			if info.Name == loopReviewTool && !s.loopReferenceReview() {
 				props, _ := root["properties"].(map[string]any)
@@ -775,6 +806,7 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		return nil, false, err
 	}
 	receipt := &loopReceipt{Accepted: []string{}, Created: map[string]string{}, Rejected: []loopRejection{}}
+	receipt.FigureOmissions = append(receipt.FigureOmissions, in.visualParseIssues...)
 	seen := map[string]bool{}
 	for _, sec := range in.Sections {
 		identity := sec.SectionID
@@ -917,6 +949,11 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 	}
 	if len(d.Article.Sections) > 40 {
 		return map[string]any{"error": "resource_limit", "limit": "40 total sections"}, false, nil
+	}
+	if s.deliveryVisuals() {
+		if err := s.placeDeliveryFigures(ctx, &d, in.FigurePlacements, receipt, catalog); err != nil {
+			return nil, false, err
+		}
 	}
 	if s.deliveryNavigation() {
 		compactDeliveryCitations(&d.Article, s.transcript)

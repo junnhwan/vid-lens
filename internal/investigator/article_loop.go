@@ -80,17 +80,19 @@ type articleLoopState struct {
 	PlannedSources       []string                               `json:"planned_sources,omitempty"`
 	ReviewClosures       int                                    `json:"review_closures,omitempty"`
 	StalledReviews       int                                    `json:"stalled_reviews,omitempty"`
+	Visual               deliveryVisualState                    `json:"visual,omitempty"`
 }
 type articleLoopCall struct {
-	Slot               int                        `json:"slot"`
-	Mode               string                     `json:"mode"`
-	Sections           []string                   `json:"sections,omitempty"`
-	Sources            []string                   `json:"sources"`
-	Frames             []string                   `json:"frames"`
-	Scope              *domain.ArticleReviewScope `json:"scope,omitempty"`
-	OutputTokens       int                        `json:"output_tokens"`
-	Delta              *domain.ArticleReviewDelta `json:"delta,omitempty"`
-	ReferenceRepairKey string                     `json:"reference_repair_key,omitempty"`
+	Slot                  int                        `json:"slot"`
+	Mode                  string                     `json:"mode"`
+	Sections              []string                   `json:"sections,omitempty"`
+	Sources               []string                   `json:"sources"`
+	Frames                []string                   `json:"frames"`
+	Scope                 *domain.ArticleReviewScope `json:"scope,omitempty"`
+	OutputTokens          int                        `json:"output_tokens"`
+	Delta                 *domain.ArticleReviewDelta `json:"delta,omitempty"`
+	ReferenceRepairKey    string                     `json:"reference_repair_key,omitempty"`
+	OptionalVisualAllowed *bool                      `json:"optional_visual_allowed,omitempty"`
 }
 
 func (s *session) articleLoop() bool {
@@ -343,6 +345,11 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 	if errors.As(cause, &problem) {
 		code = problem.Code
 	}
+	if s.deliveryVisuals() && p.Mode == "author" && code == "ARTICLE_VISUAL_BUDGET_EXHAUSTED" {
+		l.Visual.PixelsClosed, l.NextFrames = true, nil
+		l.Feedback = domain.JSON(map[string]any{"visual_status": "physical_image_input_limit", "action": "Continue complete prose without more optional images. Previously saved chapters and figures remain available."})
+		return nil
+	}
 	if code == "MODEL_OUTPUT_TRUNCATED" || code == "MODEL_RESPONSE_BUDGET_EXHAUSTED" {
 		l.OutputSections = max(1, l.OutputSections/2)
 		// A truncated review is split as a scope, never routed to the author.
@@ -431,9 +438,11 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	}
 	// Display metadata must not become a business argument. The original
 	// response remains intact in the model operation ledger.
+	activityTitle := ""
 	if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		var args map[string]json.RawMessage
 		if json.Unmarshal(raw, &args) == nil && args["activity_title"] != nil {
+			_ = json.Unmarshal(args["activity_title"], &activityTitle)
 			delete(args, "activity_title")
 			raw = domain.JSON(args)
 		}
@@ -478,12 +487,21 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			in.Finish = patch.Finish
 			result, progress, e = s.patchLoopBlocks(ctx, key, patch)
 		} else {
-			if err = loopDecode(raw, &in); err != nil {
+			if s.deliveryVisuals() {
+				err = decodeDeliveryVisualWrite(raw, &in)
+			} else {
+				err = loopDecode(raw, &in)
+			}
+			if err != nil {
 				break
 			}
 			if s.cp.ExecutionContract.Version != domain.ArticleLoopV2 && len(in.Sections) > l.OutputSections {
 				l.Feedback = domain.JSON(map[string]any{"failure": "output_scope", "max_sections": l.OutputSections})
 				return false, nil
+			}
+			if !s.deliveryVisuals() && (len(in.VisualRequests) > 0 || len(in.FigurePlacements) > 0) {
+				err = errors.New("visual write extensions are unavailable under this frozen contract")
+				break
 			}
 			result, progress, e = s.saveLoopSections(ctx, key, in)
 		}
@@ -517,6 +535,11 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			l.Scopes = nil
 			l.ReviewKeys = nil
 			l.DraftVersion = 0
+		}
+		if s.deliveryVisuals() && write["error"] == nil && receipt != nil {
+			if err := s.requestDeliveryVisuals(ctx, key, in, receipt); err != nil {
+				return progress, err
+			}
 		}
 
 		if in.Finish {
@@ -633,6 +656,10 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		if strings.TrimSpace(in.Question) == "" {
 			err = errors.New("a concrete visual question is required")
 			break
+		}
+		if s.deliveryVisuals() {
+			in.activityTitle = publicTitle(activityTitle, "")
+			return s.viewDeliveryFrames(ctx, p, in)
 		}
 		ids := []string{}
 		for _, alias := range in.FrameIDs {

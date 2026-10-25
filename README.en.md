@@ -89,6 +89,7 @@ Progress, call counts, and elapsed times reflect the page state at capture; they
 - **Start with a video**: Supports a Bilibili video or individual part, and a single YouTube video. Uses available subtitles first, with speech transcription when they are missing. Personal platform cookies are not required.
 - **Read with sources**: Articles include chapters, real video frames, timestamped citations, and a content map. Export as Markdown or an illustrated ZIP.
 - **Get the article first**: Read and export as soon as it is generated. One automatic review offers separate advice; request another review when needed.
+- **Choose frames as needed**: Capture frames for specific chapters, refine their timing, and inspect details when useful. Image counts follow the content; unavailable illustrations do not hold up the article.
 - **Ask about evidence**: The Agent searches the video's text and frames for support. Ask about the article, a passage, or a selected frame; answers identify sources and unresolved points.
 - **Follow the work**: See source preparation, investigation, writing, and review progress, then revisit saved steps. When enabled, public webpages can supplement an individual question.
 - **Share a single record**: Create a revocable read-only link to its article and processing history. Private Q&A stays private.
