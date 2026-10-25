@@ -4,6 +4,8 @@ export type Lecture = {
   title: string
   channel: string
   duration: string
+  cover: string
+  coverAlt: string
   hint: string
   url: string
   purpose: string
@@ -11,24 +13,52 @@ export type Lecture = {
 
 export const lectures: Lecture[] = [
   {
-    id: "attention",
-    kind: "动画",
-    title: "Attention 一步步怎么算",
-    channel: "3Blue1Brown",
-    duration: "约 26 分钟",
-    hint: "向量和矩阵都画在动画里",
-    url: "https://www.youtube.com/watch?v=eMlx5fFNoYc",
-    purpose: "请顺着动画里的向量和矩阵，解释 Attention 在算什么，并指出关键画面出现的时间。",
+    id: "poteto-pstack",
+    kind: "工程访谈",
+    title: "Poteto：数千个 PR 如何交付？",
+    channel: "Matt Pocock × Poteto",
+    duration: "65:35",
+    cover: "/lectures/poteto-pstack.jpg",
+    coverAlt: "Poteto 访谈的原视频封面，两位对谈者的卡通形象",
+    hint: "聊聊 pstack、AI 编程与工程验证。",
+    url: "https://www.youtube.com/watch?v=MN9dGgmLyso",
+    purpose: "请完整整理 Poteto 关于 pstack、AI 编程与工程验证的主要观点，解释工作流程、前提和限制，保留具体例子与结尾的讨论。",
   },
   {
-    id: "solid",
-    kind: "代码",
-    title: "SOLID 在 Python 里长什么样",
-    channel: "ArjanCodes",
-    duration: "约 21 分钟",
-    hint: "同一题的三版代码都在屏幕上",
-    url: "https://www.youtube.com/watch?v=uxwjXLjJOoM",
-    purpose: "请对比视频里前后几版 Python 代码的设计差异，说明为什么要重构，以及各自的取舍。",
+    id: "theo-react-native",
+    kind: "技术评论",
+    title: "AI 改变了 React Native 的选择吗？",
+    channel: "Theo · t3.gg",
+    duration: "62:52",
+    cover: "/lectures/theo-react-native.jpg",
+    coverAlt: "Did AI Kill React Native 原视频封面",
+    hint: "从 Shopify 的选择，聊到原生、Expo 与 OTA。",
+    url: "https://www.youtube.com/watch?v=oPZLPUtmROo",
+    purpose: "请完整整理视频对 React Native、原生开发、Expo 与 OTA 的讨论，解释 Shopify 的选择、各方观点及适用条件，保留争议和限制。",
+  },
+  {
+    id: "cmu-agents-intro",
+    kind: "CMU · 第 1 讲",
+    title: "智能体是什么，又如何工作？",
+    channel: "CMU AI Agents · Graham Neubig",
+    duration: "67:52",
+    cover: "/lectures/cmu-agents-intro.jpg",
+    coverAlt: "CMU 智能体课程的标题课件与讲堂画面",
+    hint: "模型、工具与循环，从基础概念进入智能体。",
+    url: "https://www.youtube.com/watch?v=UwfjzyLnvMg",
+    purpose: "请完整整理本讲对智能体的定义、模型与工具如何形成循环、训练方式和课程目标，结合有解释价值的课件，保留概念之间的关系。",
+  },
+  {
+    id: "stanford-verification",
+    kind: "Stanford · 第 3 讲",
+    title: "怎样验证智能体真的做对了？",
+    channel: "Stanford CS329A",
+    duration: "72:58",
+    cover: "/lectures/stanford-verification.jpg",
+    coverAlt: "Stanford 鲁棒验证课程的讲者与课件画面",
+    hint: "从训练验证器，到验证器集成与可靠性。",
+    url: "https://www.youtube.com/watch?v=p7TdPUcPoik",
+    purpose: "请完整解释本讲的鲁棒验证方法，对比训练验证器与验证器集成的思路、实验结论和限制，结合有解释价值的课件。",
   },
 ]
 
