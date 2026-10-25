@@ -73,6 +73,28 @@ afterEach(async () => {
 })
 
 describe("visitor request ownership", () => {
+  it("sends all selected paragraphs with their own anchors", async () => {
+    api.createTurn.mockResolvedValue({ body: turn("A", "queued") })
+    await open("A")
+    await act(async () => view.attachPassage({ quote: "第一段\n\n第二段", passages: [{ sectionId: "one", blockId: "a", quote: "第一段" }, { sectionId: "two", blockId: "b", quote: "第二段" }] }))
+    await act(async () => view.setDraft("解释它们的联系"))
+    await act(async () => view.send())
+    expect(api.createTurn).toHaveBeenCalledTimes(1)
+    expect(api.createTurn.mock.calls[0][2].context).toEqual({ frame_id: null, passage: null, passages: [{ section_id: "one", block_id: "a", quote: "第一段" }, { section_id: "two", block_id: "b", quote: "第二段" }] })
+    expect(view.passageChip).toBeNull()
+  })
+
+  it("checks the combined selection length again when sending", async () => {
+    api.session.mockResolvedValue({ schema_version: 1, csrf_token: "test", capabilities: { selection_chars_max: 6 } })
+    await open("A")
+    await act(async () => view.attachPassage({ quote: "第一段\n\n第二段", passages: [{ sectionId: "one", blockId: "a", quote: "第一段" }, { sectionId: "two", blockId: "b", quote: "第二段" }] }))
+    await act(async () => view.setDraft("解释它们的联系"))
+    await act(async () => view.send())
+    expect(api.createTurn).not.toHaveBeenCalled()
+    expect(view.qaError).toBe("选中文字合计超过了可选长度。")
+    expect(view.passageChip?.passages).toHaveLength(2)
+  })
+
   it("still applies cancellation to the current request", async () => {
     api.cancelRequest.mockResolvedValueOnce(request("A", "canceled", 2))
     await open("A")

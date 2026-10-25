@@ -344,8 +344,9 @@ type Passage struct {
 	Quote     string `json:"quote"`
 }
 type QuestionContext struct {
-	FrameID *string  `json:"frame_id"`
-	Passage *Passage `json:"passage"`
+	FrameID  *string   `json:"frame_id"`
+	Passage  *Passage  `json:"passage"`
+	Passages []Passage `json:"passages,omitempty"`
 }
 type QuestionInput struct {
 	AllowExternalSources bool            `json:"allow_external_sources,omitempty"`

@@ -5,7 +5,7 @@ import { ResourceStream, type LiveSocket } from "../api/live"
 import { canReplay, forgetWrite, newIdempotencyKey, pendingWrite, rememberWrite, type KeyValue } from "../api/writes"
 import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../contract/activity"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
-import { codePointLength } from "../contract/text"
+import { codePointLength, normalizeQuote, passageContext, type PassageChoice } from "../contract/text"
 import type { ActivityStep, Conversation, Frame, SessionResponse, TurnView } from "../contract/types"
 import { starterPrompts } from "../app/labels"
 import { errorText, normalizeStep } from "../app/visitorContract"
@@ -30,7 +30,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const [frameChip, setFrameChip] = useState<{ id: string; label: string } | null>(null)
-  const [passageChip, setPassageChip] = useState<{ sectionId: string; blockId: string; quote: string } | null>(null)
+  const [passageChip, setPassageChip] = useState<PassageChoice | null>(null)
   const [externalAllowed, setExternalAllowed] = useState(false)
   const [referenceLinks, setReferenceLinks] = useState("")
   const [busy, setBusy] = useState(false)
@@ -235,7 +235,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
       const epoch = generation.current
       if (articleID) void ensureConversation(articleID, epoch).catch((cause: unknown) => setError(errorText(cause)))
     },
-    askPassage: (passage: { sectionId: string; blockId: string; quote: string }) => {
+    askPassage: (passage: PassageChoice) => {
       setPassageChip(passage)
       setOpen(true)
       setFocusToken((value) => value + 1)
@@ -302,6 +302,10 @@ export function useExampleQuestions(articleID: string | null, title: string | un
         try {
           const sessionValue = await ensureSession()
           const max = sessionValue.capabilities.question_chars_max
+          if (sentPassage && codePointLength(normalizeQuote(sentPassage.quote)) > sessionValue.capabilities.selection_chars_max) {
+            setError("选中文字合计超过了可选长度。")
+            return
+          }
           if (max != null && codePointLength(text) > max) {
             setError("这个问题太长了。")
             return
@@ -318,7 +322,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
             expected_last_turn_id: current.last_turn_id,
             context: {
               frame_id: sentFrame?.id ?? null,
-              passage: sentPassage ? { section_id: sentPassage.sectionId, block_id: sentPassage.blockId, quote: sentPassage.quote } : null,
+              ...passageContext(sentPassage),
             },
           }
           const body = JSON.stringify(payload)
@@ -334,7 +338,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
           setExternalAllowed(false)
           setReferenceLinks("")
           setFrameChip((value) => (value?.id === sentFrame?.id ? null : value))
-          setPassageChip((value) => (value?.quote === sentPassage?.quote ? null : value))
+          setPassageChip((value) => (value === sentPassage ? null : value))
           clockRef.current = clockFrom(accepted.body.stream)
           installTurn(accepted.body, true)
           startStream(accepted.body, epoch)

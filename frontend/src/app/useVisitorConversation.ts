@@ -10,7 +10,7 @@ import {
 } from "../api/writes"
 import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../contract/activity"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
-import { codePointLength, formatClock } from "../contract/text"
+import { codePointLength, formatClock, normalizeQuote, passageContext, type PassageChoice } from "../contract/text"
 import type {
   ActivityStep,
   Conversation,
@@ -42,11 +42,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     id: string
     label: string
   } | null>(null)
-  const [passageChip, setPassageChip] = useState<{
-    sectionId: string
-    blockId: string
-    quote: string
-  } | null>(null)
+  const [passageChip, setPassageChip] = useState<PassageChoice | null>(null)
   const [qaError, setQaError] = useState("")
   const [qaBusy, setQaBusy] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({})
@@ -270,7 +266,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
         setFocusToken((value) => value + 1)
         void ensureConversation(true).catch((error: unknown) => void report(error, setQaError))
       },
-      attachPassage: (passage: { sectionId: string; blockId: string; quote: string }) => {
+      attachPassage: (passage: PassageChoice) => {
         setPassageChip(passage)
         setQaOpen(true)
         setFocusToken((value) => value + 1)
@@ -318,6 +314,12 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
           setQaError("")
           const sentFrame = frameChip
           const sentPassage = passageChip
+          const selectionMax = context.session()?.capabilities.selection_chars_max
+          if (sentPassage && selectionMax != null && codePointLength(normalizeQuote(sentPassage.quote)) > selectionMax) {
+            setQaBusy(false)
+            setQaError("选中文字合计超过了可选长度。")
+            return
+          }
           try {
             const current = await ensureConversation(true)
             if (!ownsRequest(gen, id)) return
@@ -335,13 +337,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
               expected_last_turn_id: current.last_turn_id,
               context: {
                 frame_id: sentFrame?.id ?? null,
-                passage: sentPassage
-                  ? {
-                    section_id: sentPassage.sectionId,
-                    block_id: sentPassage.blockId,
-                    quote: sentPassage.quote,
-                  }
-                  : null,
+                ...passageContext(sentPassage),
               },
             }
             const body = JSON.stringify(payload)
@@ -364,7 +360,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
             setExternalAllowed(false)
             setReferenceLinks("")
             setFrameChip((value) => (value?.id === sentFrame?.id ? null : value))
-            setPassageChip((value) => (value?.blockId === sentPassage?.blockId && value?.quote === sentPassage?.quote ? null : value))
+            setPassageChip((value) => (value === sentPassage ? null : value))
             turnClock.current = clockFrom(accepted.body.stream)
             installTurn(accepted.body, true)
           } catch (error) {

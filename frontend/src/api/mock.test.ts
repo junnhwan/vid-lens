@@ -86,4 +86,19 @@ describe("mock visitor api", () => {
     })).rejects.toMatchObject({ code: "TURN_HISTORY_CHANGED" })
     runtime.dispose()
   })
+
+  it("persists every paragraph in a multi-part question context and rejects forged pieces", async () => {
+    const { runtime, view } = await finishArticle()
+    const conversation = await runtime.api.conversation(view.request.id)
+    const article = (await runtime.api.article(view.request.id)).article
+    const first = article.sections[0].blocks[0].content?.[0].text ?? ""
+    const context = { frame_id: null, passage: null, passages: [
+      { section_id: "scene", block_id: "blk_scene", quote: first },
+      { section_id: "steps", block_id: "blk_steps", quote: "配置从菜单开始。" },
+    ] }
+    await expect(runtime.api.createTurn(conversation.conversation.id, "forged", { question: "说明它们的联系", expected_last_turn_id: null, context: { ...context, passages: [context.passages[0], { ...context.passages[1], quote: "不存在的句子" }] } })).rejects.toMatchObject({ code: "INVALID_CONTEXT" })
+    const accepted = await runtime.api.createTurn(conversation.conversation.id, "multi", { question: "说明它们的联系", expected_last_turn_id: null, context })
+    expect(accepted.body.turn.context.passages).toEqual(context.passages)
+    runtime.dispose()
+  })
 })

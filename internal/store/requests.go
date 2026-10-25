@@ -319,9 +319,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		for i, url := range in.ReferenceURLs {
 			in.ReferenceURLs[i] = strings.TrimSpace(url)
 		}
-		if in.Context.Passage != nil {
-			in.Context.Passage.Quote = domain.NormalizeQuote(in.Context.Passage.Quote)
-		}
+		in.Context.NormalizePassages()
 		scope := "turn:" + session + ":" + conversation
 		if retry != "" {
 			scope += "/retry/" + retry
@@ -402,27 +400,13 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if utf8.RuneCountInString(in.Question) > p.QuestionCharsMax || strings.TrimSpace(in.Question) == "" {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "问题为空或超过长度限制。")
 		}
-		if in.Context.Passage != nil {
-			if utf8.RuneCountInString(in.Context.Passage.Quote) > p.SelectionCharsMax || in.Context.Passage.Quote == "" {
-				return domain.Err(422, "INVALID_CONTEXT", "选段为空或过长。")
-			}
+		if in.Context.Passage != nil || len(in.Context.Passages) > 0 {
 			art, e := article(ctx, tx, c.ArticleID)
 			if e != nil {
 				return e
 			}
-			found := false
-			for _, sec := range art.Sections {
-				if sec.ID != in.Context.Passage.SectionID {
-					continue
-				}
-				for _, b := range sec.Blocks {
-					if b.ID == in.Context.Passage.BlockID && strings.Contains(domain.NormalizeQuote(domain.BlockText(b)), in.Context.Passage.Quote) {
-						found = true
-					}
-				}
-			}
-			if !found {
-				return domain.Err(422, "INVALID_CONTEXT", "选段不属于这篇文章。")
+			if e = domain.ValidateQuestionPassages(art, in.Context, p.SelectionCharsMax); e != nil {
+				return e
 			}
 		}
 		if in.Context.FrameID != nil {

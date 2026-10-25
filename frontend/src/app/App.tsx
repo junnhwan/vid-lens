@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { choosePassage } from "../contract/text"
 import { useVisitor } from "./useVisitor"
 import { carryStill, hideView, showView } from "../ui/motion"
-import { hitsInSelection } from "../ui/selection"
+import { hitsInSelection, selectionPopover } from "../ui/selection"
 import { EntryView } from "../ui/EntryView"
 import { Lightbox } from "../ui/Lightbox"
 import { ReadView } from "../ui/ReadView"
@@ -131,29 +131,18 @@ export function App() {
           setPop(null)
           return
         }
-        const enriched = found.hits.flatMap((hit) => {
-          const section = article.sections.find((item) => item.id === hit.sectionId)
-          const block = section?.blocks.find((item) => item.id === hit.blockId)
-          return block ? [{ sectionId: hit.sectionId, blockId: hit.blockId, block }] : []
-        })
-        const raw = found.hits.map((hit) => hit.quote).join(" ")
-        const result = choosePassage(enriched, raw, visitor.selectionMax)
-        const rect = found.rect
-        const left = Math.max(12, Math.min(rect.left + rect.width / 2 - 36, window.innerWidth - 84))
-        let top = rect.top - 38
-        if (top < 64) top = rect.bottom + 8
+        const result = choosePassage(found.hits, article.sections, visitor.selectionMax)
+        const { left, top } = selectionPopover(found.rect, window.innerWidth, window.innerHeight)
         if (!result.ok && result.reason === "empty") {
           setPop(null)
           return
         }
         const label =
-          !result.ok && result.reason === "cross"
-            ? "请只选择一段"
-            : !result.ok && result.reason === "long"
-              ? "这段太长了"
-              : !result.ok
-                ? "这段对不上正文"
-                : "问这段"
+          !result.ok && result.reason === "long"
+            ? "选中文字过长"
+            : !result.ok
+              ? "选文对不上正文"
+              : "问选中内容"
         setPop({
           left,
           top,
@@ -162,11 +151,9 @@ export function App() {
             setPop(null)
             if (!result.ok) {
               const note =
-                result.reason === "cross"
-                  ? "请只选择一个段落。"
-                  : result.reason === "long"
-                    ? "这段超过了可选长度。"
-                    : "这段文字对不上文章里的那一段。"
+                result.reason === "long"
+                  ? "选中文字合计超过了可选长度。"
+                  : "选中文字对不上文章原文。"
               announceRef.current(note)
               return
             }

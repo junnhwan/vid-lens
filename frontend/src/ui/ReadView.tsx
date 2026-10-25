@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, ArticleResponse, Citation, Frame, RequestView, TurnView } from "../contract/types"
-import { formatDuration, platformLabel } from "../contract/text"
+import { formatDuration, platformLabel, type PassageChoice } from "../contract/text"
 import { prefersReduced } from "./motion"
 import { ActivityList } from "./ActivityList"
 import { BlockView } from "./Blocks"
@@ -24,7 +24,7 @@ export function ReadView(props: {
   stepsFor: (turn: TurnView) => ActivityStep[]
   draft: string
   frameChip: { id: string; label: string } | null
-  passageChip: { sectionId: string; blockId: string; quote: string } | null
+  passageChip: PassageChoice | null
   prompts: string[]
   qaBusy: boolean
   qaError: string

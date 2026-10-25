@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ActivityStep, Citation, Frame, TurnView } from "../contract/types"
 import { describeTurn } from "../app/labels"
-import { clipText, formatClock } from "../contract/text"
+import { clipText, contextQuote, formatClock } from "../contract/text"
 import { AnswerBody } from "./AnswerBody"
 import { ActivityList } from "./ActivityList"
 import { ReferenceCard } from "./ReferenceCard"
@@ -200,9 +200,9 @@ export function QaPanel({
                     </span>
                   </span>
                 ) : null}
-                {turn.turn.context.passage ? (
+                {contextQuote(turn.turn.context) ? (
                   <span className="chip static">
-                    <span>{clipText(turn.turn.context.passage.quote, 18)}</span>
+                    <span title={contextQuote(turn.turn.context)}>{clipText(contextQuote(turn.turn.context), 18)}</span>
                   </span>
                 ) : null}
               </div>
@@ -292,8 +292,8 @@ export function QaPanel({
           ) : null}
           {passageChip ? (
             <span className="chip">
-              <span>{clipText(passageChip.quote, 18)}</span>
-              <button type="button" aria-label="移除选中段落" onClick={onRemovePassage}>
+              <span title={passageChip.quote}>{clipText(passageChip.quote, 18)}</span>
+              <button type="button" aria-label="移除选中内容" onClick={onRemovePassage}>
                 ×
               </button>
             </span>

@@ -10,7 +10,7 @@ import { ArticleOutline } from "../ui/ArticleOutline"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
 import { QaPanel } from "../ui/QaPanel"
-import { hitsInSelection } from "../ui/selection"
+import { hitsInSelection, selectionPopover } from "../ui/selection"
 import { prefersReduced } from "../ui/motion"
 import { catalogChoice, exampleArchive, exampleRoute, exampleShelf, type CatalogItem, type ExampleData } from "./exampleReplay"
 import { useExampleQuestions } from "./useExampleQuestions"
@@ -194,18 +194,10 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
         if (!prose || data.qa_available === false) { setPop(null); return }
         const found = hitsInSelection(prose)
         if (!found.rect || !found.hits.length) { setPop(null); return }
-        const enriched = found.hits.flatMap((hit) => {
-          const item = sections.find((section) => section.id === hit.sectionId)
-          const block = item?.blocks.find((entry) => entry.id === hit.blockId)
-          return block ? [{ sectionId: hit.sectionId, blockId: hit.blockId, block }] : []
-        })
-        const result = choosePassage(enriched, found.hits.map((hit) => hit.quote).join(" "), questions.selectionMax)
-        const rect = found.rect
-        const left = Math.max(12, Math.min(rect.left + rect.width / 2 - 36, window.innerWidth - 84))
-        let top = rect.top - 38
-        if (top < 64) top = rect.bottom + 8
+        const result = choosePassage(found.hits, sections, questions.selectionMax)
+        const { left, top } = selectionPopover(found.rect, window.innerWidth, window.innerHeight)
         if (!result.ok && result.reason === "empty") { setPop(null); return }
-        const label = !result.ok && result.reason === "cross" ? "请只选择一段" : !result.ok && result.reason === "long" ? "这段太长了" : !result.ok ? "这段对不上正文" : "问这段"
+        const label = !result.ok && result.reason === "long" ? "选中文字过长" : !result.ok ? "选文对不上正文" : "问选中内容"
         setPop({
           left, top, label, pick: () => {
             setPop(null)

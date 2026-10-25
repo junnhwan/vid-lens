@@ -1,4 +1,4 @@
-import type { Block, Citation, Inline, Range } from "./types"
+import type { Block, Citation, Inline, QuestionContext, Range } from "./types"
 
 export function codePointLength(value: string): number {
   return [...value].length
@@ -44,32 +44,55 @@ export function quoteMatchesBlock(block: Block, quote: string): boolean {
   return normalizeQuote(blockPlainText(block)).includes(normalized)
 }
 
-export interface PassageChoice {
+export interface PassagePick {
   sectionId: string
   blockId: string
   quote: string
 }
 
-export type PassageResult = { ok: true; passage: PassageChoice } | { ok: false; reason: "empty" | "cross" | "long" | "mismatch" }
+export interface PassageChoice {
+  quote: string
+  passages: PassagePick[]
+}
+
+export type PassageResult = { ok: true; passage: PassageChoice } | { ok: false; reason: "empty" | "long" | "mismatch" }
 
 export function choosePassage(
-  hits: { sectionId: string; blockId: string; block: Block }[],
-  rawQuote: string,
+  hits: PassagePick[],
+  sections: { id: string; blocks: Block[] }[],
   maxCodePoints: number | null,
 ): PassageResult {
-  const unique = new Map<string, { sectionId: string; blockId: string; block: Block }>()
-  for (const hit of hits) unique.set(hit.blockId, hit)
-  if (unique.size === 0) return { ok: false, reason: "empty" }
-  if (unique.size > 1) return { ok: false, reason: "cross" }
-  const hit = [...unique.values()][0]
-  const quote = normalizeQuote(rawQuote)
-  if ([...quote].length < 2) return { ok: false, reason: "empty" }
-  if (maxCodePoints != null && codePointLength(quote) > maxCodePoints) return { ok: false, reason: "long" }
-  if (!quoteMatchesBlock(hit.block, quote)) return { ok: false, reason: "mismatch" }
-  return {
-    ok: true,
-    passage: { sectionId: hit.sectionId, blockId: hit.blockId, quote },
+  if (!hits.length) return { ok: false, reason: "empty" }
+  const passages = hits.map((hit) => ({ ...hit, quote: normalizeQuote(hit.quote) }))
+  const joined = passages.map((part) => part.quote).join(" ")
+  if (codePointLength(joined) < 2) return { ok: false, reason: "empty" }
+  if (maxCodePoints != null && codePointLength(joined) > maxCodePoints) return { ok: false, reason: "long" }
+  const blocks = sections.flatMap((section) => section.blocks.map((block) => ({
+    sectionId: section.id, blockId: block.id, text: normalizeQuote(blockPlainText(block)),
+  }))).filter((block) => block.text)
+  let previous = -1
+  for (const [index, part] of passages.entries()) {
+    const position = blocks.findIndex((block) => block.sectionId === part.sectionId && block.blockId === part.blockId)
+    const text = blocks[position]?.text
+    if (!part.quote || !text?.includes(part.quote) || (index > 0 && position !== previous + 1)) return { ok: false, reason: "mismatch" }
+    if (passages.length > 1) {
+      const matches = index === 0 ? text.endsWith(part.quote) : index === passages.length - 1 ? text.startsWith(part.quote) : text === part.quote
+      if (!matches) return { ok: false, reason: "mismatch" }
+    }
+    previous = position
   }
+  return { ok: true, passage: { quote: passages.map((part) => part.quote).join("\n\n"), passages } }
+}
+
+export function passageContext(selection: PassageChoice | null): Pick<QuestionContext, "passage" | "passages"> {
+  if (!selection?.passages.length) return { passage: null }
+  const passages = selection.passages.map((part) => ({ section_id: part.sectionId, block_id: part.blockId, quote: part.quote }))
+  // Keep single-block requests byte-compatible with cached clients and history.
+  return passages.length === 1 ? { passage: passages[0] } : { passage: null, passages }
+}
+
+export function contextQuote(context: QuestionContext): string {
+  return context.passages?.length ? context.passages.map((part) => part.quote).join("\n\n") : context.passage?.quote ?? ""
 }
 
 export function formatClock(ms: number): string {

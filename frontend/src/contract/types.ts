@@ -298,6 +298,7 @@ export interface Passage {
 export interface QuestionContext {
   frame_id: string | null
   passage: Passage | null
+  passages?: Passage[]
 }
 
 export interface Inline {

@@ -11,7 +11,7 @@ import type {
   SourceSummary,
   TurnView,
 } from "../contract/types"
-import { quoteMatchesBlock } from "../contract/text"
+import { choosePassage, contextQuote } from "../contract/text"
 import { ApiError } from "./error"
 import type { LiveSocket } from "./live"
 import type { Runtime } from "./runtime"
@@ -859,16 +859,14 @@ class MockWorld {
         detail: "这张画面不属于当前视频。",
       })
     }
-    const passage = context?.passage
-    if (!passage) return
-    const block = article.sections
-      .flatMap((section) => section.blocks.map((item) => ({ section, item })))
-      .find((item) => item.item.id === passage.block_id && item.section.id === passage.section_id)
-    if (!block || !quoteMatchesBlock(block.item, passage.quote)) {
+    const parts = context?.passages?.length ? context.passages : context?.passage ? [context.passage] : []
+    if (!parts.length) return
+    const selection = choosePassage(parts.map((part) => ({ sectionId: part.section_id, blockId: part.block_id, quote: part.quote })), article.sections, 1000)
+    if ((context?.passage && context.passages?.length) || !selection.ok) {
       throw new ApiError({
         status: 422,
         code: "INVALID_CONTEXT",
-        detail: "选中的文字不在这一段里。",
+        detail: "选中文字不是连续的原文，或合计超过长度限制。",
       })
     }
   }
@@ -890,7 +888,7 @@ class MockWorld {
       talk.steps.push(
         step({
           id: `${talk.id}-read`,
-          title: talk.context.passage ? "正在阅读选中的段落" : "正在阅读相关段落",
+          title: contextQuote(talk.context) ? "正在阅读选中的内容" : "正在阅读相关段落",
           purpose: "对照文章和这条视频。",
           status: "running",
           first_seq: 2,

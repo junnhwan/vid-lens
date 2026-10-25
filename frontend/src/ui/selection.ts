@@ -4,11 +4,28 @@ export interface BlockHit {
   quote: string
 }
 
+export function selectionPopover(rect: Pick<DOMRect, "left" | "width" | "top" | "bottom">, viewportWidth: number, viewportHeight: number) {
+  const left = Math.max(12, Math.min(rect.left + rect.width / 2 - 48, viewportWidth - 108))
+  const preferredTop = rect.top >= 106 ? rect.top - 38 : rect.bottom + 8
+  const top = Math.max(72, Math.min(preferredTop, viewportHeight - 44))
+  return { left, top }
+}
+
 function quoteIn(block: HTMLElement, range: Range): string {
-  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+  // Keep the DOM projection aligned with blockPlainText: UI controls are not
+  // article text, and list/table cell boundaries are whitespace separators.
+  const groups = block.matches("table") ? [...block.querySelectorAll<HTMLElement>("th, td")]
+    : block.matches("ol, ul") ? [...block.children].filter((child): child is HTMLElement => child instanceof HTMLElement && child.matches("li"))
+    : block.matches("figure") ? [...block.querySelectorAll<HTMLElement>("figcaption > span:first-child")]
+    : [block]
+  return groups.map((group) => quoteInGroup(group, range)).filter((quote) => quote.trim()).join("\n")
+}
+
+function quoteInGroup(group: HTMLElement, range: Range): string {
+  const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT)
   let text = ""
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node as Text).parentElement?.closest("[data-citation]")) continue
+    if ((node as Text).parentElement?.closest("[data-citation], .cite-cluster, button")) continue
     if (!range.intersectsNode(node)) continue
     const content = node.textContent ?? ""
     if (node === range.startContainer && node === range.endContainer) text += content.slice(range.startOffset, range.endOffset)

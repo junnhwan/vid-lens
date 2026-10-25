@@ -119,6 +119,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		fixed["goal"] = "Answer the current question about this video using verified evidence and formal submission."
 		dynamic["question"] = s.turn.Question
 		dynamic["context"] = s.turn.Context
+		if len(s.turn.Context.Passages) > 0 {
+			fixed["selected_passages_rule"] = "context.passages is one continuous user selection in article order. Read all selected quotes together to answer the question. Each part keeps its own section_id/block_id and verbatim quote. If citing the article, create a separate article_passage citation for each relevant part; never bind the combined selection to a single block."
+		}
 		if s.turn.AllowExternalSources {
 			refs, e := s.seedReferences(ctx)
 			if e != nil {
