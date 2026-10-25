@@ -3,7 +3,20 @@ import type { Block, Citation, Frame, Inline } from "../contract/types"
 import { citationClock, citationStart, formatClock } from "../contract/text"
 import { FrameThumb } from "./FrameThumb"
 
+function readingCitations(cites: Citation[]): Citation[] {
+  const seen = new Set<string>()
+  return cites.filter((citation) => {
+    // An ASR window is not a sentence timestamp. Untimed source entries add
+    // no useful navigation to the paragraph; keep the stored evidence intact.
+    if (citation.kind === "video_text" && citationStart(citation) == null) return false
+    if (seen.has(citation.id)) return false
+    seen.add(citation.id)
+    return true
+  })
+}
+
 export function citationClusterLabel(cites: Citation[]): string {
+  cites = readingCitations(cites)
   if (!cites.length) return ""
   if (cites.length === 1) return citationClock(cites[0])
   const starts = cites.map(citationStart).filter((value): value is number => value != null)
@@ -25,7 +38,7 @@ function previewFrame(cites: Citation[], frames: Map<string, Frame> | undefined)
 }
 
 function CiteCluster({
-  cites,
+  cites: rawCites,
   frames,
   onCite,
 }: {
@@ -33,6 +46,7 @@ function CiteCluster({
   frames?: Map<string, Frame>
   onCite: (citation: Citation) => void
 }) {
+  const cites = readingCitations(rawCites)
   if (!cites.length) return null
   const frame = previewFrame(cites, frames)
   if (cites.length === 1) {

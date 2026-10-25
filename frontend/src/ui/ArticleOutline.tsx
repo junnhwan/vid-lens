@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { CSSProperties } from "react"
 
 export function arcMarks(count: number, active: number) {
@@ -39,6 +39,13 @@ function smoothSpine(marks: { spine: number; y: number }[]) {
   return path
 }
 
+export function outlineWindow(count: number, active: number, size: number, requested?: number) {
+  const capacity = Math.max(1, size)
+  const lastStart = Math.max(0, Math.ceil(count / capacity) - 1) * capacity
+  const start = Math.min(lastStart, Math.max(0, requested ?? Math.floor(Math.max(0, active) / capacity) * capacity))
+  return { start, end: Math.min(count, start + capacity) }
+}
+
 export function ArticleOutline({
   sections,
   current,
@@ -52,15 +59,25 @@ export function ArticleOutline({
 }) {
   const [open, setOpen] = useState(true)
   const [hover, setHover] = useState<number | null>(null)
+  const [pageSize, setPageSize] = useState(12)
+  const [browsed, setBrowsed] = useState<{ current: string; start: number } | null>(null)
+  useEffect(() => {
+    const resize = () => setPageSize(Math.max(4, Math.min(12, Math.floor((window.innerHeight - 320) / 28))))
+    resize()
+    window.addEventListener("resize", resize)
+    return () => window.removeEventListener("resize", resize)
+  }, [])
   const place = sections.findIndex((section) => section.id === current)
-  const arc = arcMarks(sections.length, place)
+  const { start, end } = outlineWindow(sections.length, place, pageSize, browsed?.current === current ? browsed.start : undefined)
+  const visible = sections.slice(start, end)
+  const arc = arcMarks(visible.length, place - start)
   if (!sections.length) return null
-  const shown = hover ?? (arc.engaged ? place : null)
+  const shown = hover !== null && hover >= start && hover < end ? hover : arc.engaged ? place : start > 0 ? start : null
   const caption = shown === null ? "从标题读起" : sections[shown].title
-  const captionY = shown === null ? arc.marks[0].y : arc.marks[shown].y
+  const captionY = Math.max(42, Math.min(arc.height - 42, arc.marks[shown === null ? 0 : shown - start].y))
   const captionIndex = shown === null ? "" : String(shown + 1).padStart(2, "0")
   return (
-    <aside className="article-outline" aria-label={label}>
+    <aside className="article-outline" aria-label={label} data-open={open}>
       <div className="outline-heading">
         <p className="outline-kicker">
           <span>{label}</span>
@@ -76,7 +93,8 @@ export function ArticleOutline({
           </span>
         </p>
         <button type="button" aria-expanded={open} aria-controls="article-outline-items" onClick={() => setOpen((value) => !value)}>
-          {open ? "收起" : "展开"}
+          <span className="outline-toggle-label">{open ? "收起" : "展开"}</span>
+          <svg className="outline-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
         </button>
       </div>
       {open ? (
@@ -98,8 +116,9 @@ export function ArticleOutline({
               <path d={arc.spine} />
             </svg>
             <ol>
-              {sections.map((section, index) => {
-                const mark = arc.marks[index]
+              {visible.map((section, offset) => {
+                const index = start + offset
+                const mark = arc.marks[offset]
                 return (
                   <li key={section.id}>
                     <a
@@ -120,7 +139,7 @@ export function ArticleOutline({
                         onJump(section.id)
                       }}
                     >
-                      <span className="arc-mark" />
+                      <span className="arc-mark" aria-hidden="true" />
                     </a>
                   </li>
                 )
@@ -131,6 +150,13 @@ export function ArticleOutline({
               <span className="arc-caption-title">{caption}</span>
             </p>
           </div>
+          {sections.length > pageSize ? (
+            <div className="outline-pages">
+              <button type="button" aria-label="显示较早的章节" disabled={start === 0} onClick={() => { setHover(null); setBrowsed({ current, start: Math.max(0, start - pageSize) }) }}><span aria-hidden="true">↑</span><span className="outline-page-label">上一组</span></button>
+              <span className="outline-page-range" aria-live="polite">{String(start + 1).padStart(2, "0")}–{String(end).padStart(2, "0")}</span>
+              <button type="button" aria-label="显示后续章节" disabled={end === sections.length} onClick={() => { setHover(null); setBrowsed({ current, start: start + pageSize }) }}><span className="outline-page-label">下一组</span><span aria-hidden="true">↓</span></button>
+            </div>
+          ) : null}
         </nav>
       ) : null}
     </aside>

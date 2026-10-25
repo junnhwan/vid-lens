@@ -223,7 +223,6 @@ export function ReadView(props: {
             图文
           </button>
         ) : null}
-        {article && !stage ? <ArticleOutline key={article.id} sections={article.sections} current={current} onJump={jump} /> : null}
         <div
           className="article-col"
           ref={colRef}
@@ -292,62 +291,65 @@ export function ReadView(props: {
               </div>
             </div>
             {article?.mind_map ? <MindMap key={article.id} map={article.mind_map} current={current} onJump={jump} /> : null}
-            <div className="prose" id="prose" data-arrive={arrive ? "true" : undefined}>
-              {props.article && !props.article.media.can_inspect_now ? (
-                <p className="history-note">
-                  {props.article.media.can_restore_for_question
-                    ? "现在不能直接查看新的画面。提问时可以再准备这条视频。"
-                    : "现在不能查看新的画面。已有文章仍然可以读。"}
-                </p>
-              ) : null}
-              {props.articleError ? (
-                <p className="form-error">
-                  {props.articleError}{" "}
-                  <button type="button" className="btn quiet" onClick={props.onRetryArticle}>
-                    重新读取
-                  </button>
-                </p>
-              ) : null}
-              {article?.sections.map((section, index) => (
-                <section key={section.id} style={arrive ? { animationDelay: `${Math.min(index, 5) * 48}ms` } : undefined}>
-                  <h2 id={section.id} tabIndex={-1}>
-                    <span className="chapter-no" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="chapter-title">{section.title}</span>
-                  </h2>
-                  {section.blocks.map((block) => (
-                    <BlockView
-                      key={block.id}
-                      block={block}
-                      sectionId={section.id}
-                      carry={block.id === firstFigure}
-                      citations={article.citations ?? {}}
-                      frames={props.frames}
-                      onOpenFrame={props.onOpenFrame}
-                      onAskFrame={props.onAskFrame}
-                      onCite={props.onCite}
-                      onBroken={props.onBroken}
-                    />
-                  ))}
-                </section>
-              ))}
-              {(article?.limitations ?? []).length ? (
-                <div className="limits">
-                  <h2>还没确认的部分</h2>
-                  <ul>
-                    {(article?.limitations ?? []).map((item) => (
-                      <li key={`${item.code}-${item.message}`}>
-                        {item.message}
-                        {(item.section_ids ?? []).map((id) => (
-                          <button type="button" className="time" key={id} onClick={() => jump(id)}>
-                            定位
-                          </button>
-                        ))}
-                      </li>
+            <div className="article-reading">
+              {article && !stage ? <ArticleOutline key={article.id} sections={article.sections} current={current} onJump={jump} /> : null}
+              <div className="prose" id="prose" data-arrive={arrive ? "true" : undefined}>
+                {props.article && !props.article.media.can_inspect_now ? (
+                  <p className="history-note">
+                    {props.article.media.can_restore_for_question
+                      ? "现在不能直接查看新的画面。提问时可以再准备这条视频。"
+                      : "现在不能查看新的画面。已有文章仍然可以读。"}
+                  </p>
+                ) : null}
+                {props.articleError ? (
+                  <p className="form-error">
+                    {props.articleError}{" "}
+                    <button type="button" className="btn quiet" onClick={props.onRetryArticle}>
+                      重新读取
+                    </button>
+                  </p>
+                ) : null}
+                {article?.sections.map((section, index) => (
+                  <section key={section.id} style={arrive ? { animationDelay: `${Math.min(index, 5) * 48}ms` } : undefined}>
+                    <h2 id={section.id} tabIndex={-1}>
+                      <span className="chapter-no" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                      <span className="article-chapter-title">{section.title}</span>
+                    </h2>
+                    {section.blocks.map((block) => (
+                      <BlockView
+                        key={block.id}
+                        block={block}
+                        sectionId={section.id}
+                        carry={block.id === firstFigure}
+                        citations={article.citations ?? {}}
+                        frames={props.frames}
+                        onOpenFrame={props.onOpenFrame}
+                        onAskFrame={props.onAskFrame}
+                        onCite={props.onCite}
+                        onBroken={props.onBroken}
+                      />
                     ))}
-                  </ul>
-                </div>
-              ) : null}
-              {article && props.view?.request.id && !props.preview ? <ArticleReviewPanel key={article.id} requestId={props.view.request.id} csrf={props.csrf} onJump={jump} /> : null}
+                  </section>
+                ))}
+                {(article?.limitations ?? []).length ? (
+                  <div className="limits">
+                    <h2>还没确认的部分</h2>
+                    <ul>
+                      {(article?.limitations ?? []).map((item) => (
+                        <li key={`${item.code}-${item.message}`}>
+                          {item.message}
+                          {(item.section_ids ?? []).map((id) => (
+                            <button type="button" className="time" key={id} onClick={() => jump(id)}>
+                              定位
+                            </button>
+                          ))}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {article && props.view?.request.id && !props.preview ? <ArticleReviewPanel key={article.id} requestId={props.view.request.id} csrf={props.csrf} onJump={jump} /> : null}
+              </div>
             </div>
           </article>
         </div>

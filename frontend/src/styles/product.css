@@ -1429,7 +1429,7 @@
   letter-spacing: 0.04em;
 }
 
-.chapter-title {
+.chapter-list .chapter-title {
   min-width: 0;
   color: var(--ink);
   font-size: 12px;
