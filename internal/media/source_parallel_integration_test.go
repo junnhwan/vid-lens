@@ -18,6 +18,15 @@ import (
 )
 
 func TestSourceDownloadsVideoAndAudioTogetherThenPublishesVerifiedTranscript(t *testing.T) {
+	testParallelSourceAudio(t, false)
+}
+
+func TestSourceAcceptsAudioAbove64MiBWithinCombinedDownloadLimit(t *testing.T) {
+	testParallelSourceAudio(t, true)
+}
+
+func testParallelSourceAudio(t *testing.T, largeAudio bool) {
+	t.Helper()
 	db, res, cfg := testsupport.Services(t)
 	ctx := context.Background()
 	fixture := t.TempDir()
@@ -30,6 +39,13 @@ func TestSourceDownloadsVideoAndAudioTogetherThenPublishesVerifiedTranscript(t *
 	} {
 		if out, err := exec.Command("ffmpeg", append([]string{"-nostdin", "-v", "error", "-filter_threads", "1"}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("%v %s", err, out)
+		}
+	}
+	if largeAudio {
+		// Keep a valid two-second WAV at the front, with sparse trailing padding.
+		// This exercises the real transfer bound without a long ASR fixture.
+		if err := os.Truncate(audio, 65<<20); err != nil {
+			t.Fatal(err)
 		}
 	}
 	script := fmt.Sprintf(`#!/bin/sh

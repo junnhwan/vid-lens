@@ -163,7 +163,7 @@ func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed 
 		// Their wait must use the probe deadline rather than the streaming default.
 		options = append(options, outbound.CredentialOptions{ResponseHeaderTimeout: 5 * time.Minute})
 	}
-	client, err := outbound.CredentialClient(ctx, p.ModelBaseURL, proxy, p.ModelProxyPolicy, allowed, 300*time.Second, options...)
+	client, err := outbound.CredentialClient(ctx, p.ModelBaseURL, proxy, p.ModelProxyPolicy, allowed, modelHTTPTimeout(ctx), options...)
 	if err != nil {
 		return nil, domain.Err(503, "MODEL_UNAVAILABLE", "模型端点或代理不符合服务器出站策略。")
 	}
@@ -308,6 +308,7 @@ func completeModelResponse(ctx context.Context, base model.ToolCallingChatModel,
 type modelResponseLimits struct {
 	Total, First, Idle time.Duration
 	NarrowOnDeadline   bool
+	BudgetDeadline     bool
 }
 
 var errEmptyModelResponse = &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型响应已结束，但没有正文或工具动作；空响应未作为有效结果。", Transient: true}
@@ -338,6 +339,9 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 				return ctx.Err()
 			}
 			if errors.Is(cause, context.DeadlineExceeded) {
+				if limits.BudgetDeadline {
+					return &domain.WorkError{Code: "MODEL_CALL_BUDGET_EXHAUSTED", Message: "模型调用达到冻结总时长预算；这不代表响应流无进展，未完成结果保留为未知，不重发原输入。"}
+				}
 				if limits.NarrowOnDeadline && hadActivity {
 					return &domain.WorkError{Code: "MODEL_RESPONSE_BUDGET_EXHAUSTED", Message: "响应已开始但未在本次冻结时间内完整结束；发送结果仍为未知，下一调用须缩小工作范围。"}
 				}
@@ -386,7 +390,10 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 				}
 			}
 		}
-		meaningful := chunk.Content != "" || chunk.ReasoningContent != "" || len(chunk.ToolCalls) > 0
+		meaningful := chunk.Content != "" || chunk.ReasoningContent != ""
+		for _, tc := range chunk.ToolCalls {
+			meaningful = meaningful || tc.Function.Name != "" || tc.Function.Arguments != ""
+		}
 		if v, ok := chunk.Extra["reasoning-content"].(string); ok && v != "" {
 			meaningful = true
 		}

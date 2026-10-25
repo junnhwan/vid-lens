@@ -151,7 +151,7 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 	}
 	if s.articleCall != nil {
 		b.Phase = "compose"
-		if s.articleCall.Mode == "review" {
+		if s.articleCall.Mode == "review" || s.articleCall.Mode == "source" {
 			b.Phase = "validate"
 		}
 		b.OutputTokens = s.articleCall.OutputTokens

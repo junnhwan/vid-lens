@@ -13,7 +13,7 @@ FROM denoland/deno:2.9.6 AS javascript
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates util-linux \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir 'yt-dlp[default]==2026.8.19'
+ && pip install --no-cache-dir 'yt-dlp[default]==2026.10.21'
 COPY --from=javascript /usr/bin/deno /usr/local/bin/deno
 COPY --from=build /vidlens /usr/local/bin/vidlens
 COPY --chmod=755 scripts/backend_entrypoint.sh /usr/local/bin/vidlens-entrypoint

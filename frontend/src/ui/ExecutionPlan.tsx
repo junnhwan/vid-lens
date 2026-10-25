@@ -127,7 +127,9 @@ export function ExecutionPlan({
               <span className="chapter-summary-title">{plan.open_ended ? "已保存章节" : "章节进度"}</span>
               <span className="chapter-summary-note">
                 {plan.open_ended
-                  ? completed ? `已保存 ${saved} 章，核验已完成` : `已保存 ${saved} 章，完成后还需核验`
+                  ? plan.items.some((item) => item.id === "validate")
+                    ? completed ? `已保存 ${saved} 章，核验已完成` : `已保存 ${saved} 章，完成后还需核验`
+                    : completed ? `已完成 ${saved} 章，可阅读和导出` : `已保存 ${saved} 章，正在继续生成`
                   : saved === total ? `全部 ${total} 章已保存` : writing ? `正在写「${writing}」` : `已保存 ${saved} 章 · 还剩 ${total - saved} 章`}
               </span>
             </span>

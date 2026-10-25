@@ -69,7 +69,7 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 		}
 	}
 	scope.ContextSourceIDs = nil
-	if s.loopEvidenceReview() && !scope.BoundedContext && !s.cp.ArticleLoop.LimitedReviewContext {
+	if s.loopEvidenceReview() && !scope.BoundedContext && !s.cp.ArticleLoop.LimitedReviewContext && !s.loopWorkPlannedReview() {
 		// Full originals are context, not extra coverage work. Capacity still checked before sending.
 		for _, original := range s.transcript {
 			if !slices.Contains(scope.SourceIDs, original.ID) {
@@ -82,6 +82,9 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 		if slices.Contains(contextIDs, original.ID) {
 			scope.ContextSourceIDs = append(scope.ContextSourceIDs, original.ID)
 		}
+	}
+	if s.loopReferenceReview() && !scope.Global {
+		scope.ContextBlockIDs = domain.ArticleCrossChapterBlocks(a, scope)
 	}
 	return scope
 }
@@ -98,6 +101,9 @@ func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewS
 
 func (s *session) buildLoopScopes(a domain.Article, units bool) []domain.ArticleReviewScope {
 	limit := loopReviewWorkRunes
+	if s.loopWorkPlannedReview() {
+		limit = domain.ArticleReviewLocalWorkRunes
+	}
 	if s.cp.ArticleLoop.ReviewWorkLimit > 0 {
 		limit = s.cp.ArticleLoop.ReviewWorkLimit
 	}
@@ -114,7 +120,7 @@ func (s *session) buildLoopScopes(a domain.Article, units bool) []domain.Article
 		scope.ID = store.Hash(scope)[:24]
 		return scope
 	}
-	if len(a.Sections) == 0 || !units && (s.loopCompactReview() && s.cp.ArticleLoop.ReviewWorkLimit == 0 || s.loopScopeWork(a, whole) <= limit) {
+	if len(a.Sections) == 0 || !s.loopWorkPlannedReview() && !units && (s.loopCompactReview() && s.cp.ArticleLoop.ReviewWorkLimit == 0 || s.loopScopeWork(a, whole) <= limit) {
 		return []domain.ArticleReviewScope{seal(whole)}
 	}
 	chapters := make([]domain.ArticleReviewScope, len(a.Sections))
@@ -254,6 +260,17 @@ func (s *session) loopScopeWork(a domain.Article, scope domain.ArticleReviewScop
 	for _, section := range a.Sections {
 		if slices.Contains(scope.SectionIDs, section.ID) {
 			projected.Sections = append(projected.Sections, section)
+		} else if s.loopWorkPlannedReview() {
+			contextSection := section
+			contextSection.Blocks = nil
+			for _, block := range section.Blocks {
+				if slices.Contains(scope.ContextBlockIDs, block.ID) {
+					contextSection.Blocks = append(contextSection.Blocks, block)
+				}
+			}
+			if len(contextSection.Blocks) > 0 {
+				projected.Sections = append(projected.Sections, contextSection)
+			}
 		}
 	}
 	work := utf8.RuneCount(domain.JSON(domain.ReadingArticle(projected)))
@@ -314,6 +331,9 @@ func (s *session) loopReusableReview(ctx context.Context, a domain.Article, scop
 	l := s.cp.ArticleLoop
 	if key := l.ReviewCache[material]; key != "" {
 		return key, nil
+	}
+	if s.loopReferenceReview() {
+		return "", nil
 	}
 	if !s.loopCompactReview() || scope.Global {
 		return "", nil

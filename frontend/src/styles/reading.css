@@ -1,4 +1,9 @@
 .workspace[data-qa="closed"] { width: min(calc(40rem + 328px), calc(100% - 96px)); }
+.saved-draft { margin: 24px 0; padding: 18px 20px; border: 1px solid var(--line); border-radius: 8px; }
+.saved-draft summary { cursor: pointer; font: 500 14px/1.6 var(--sans); }
+.saved-draft-body { max-height: 60vh; overflow: auto; padding-right: 16px; }
+.article-review { scroll-margin-top: 100px; }
+.article-review > .btn { margin-top: 12px; }
 .article-outline { position: sticky; top: 104px; width: 292px; flex: none; margin: 18px 20px 0 0; font-family: var(--sans); container: outline / inline-size; transition: width 280ms var(--ease-out), margin 280ms var(--ease-out), opacity 200ms ease; }
 .outline-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .outline-kicker { display: flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink-soft); font: 500 11px/1 var(--sans); letter-spacing: .2em; }

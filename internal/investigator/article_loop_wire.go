@@ -246,7 +246,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 	if review {
 		var reviewTool tool.EnhancedInvokableTool
 		var err error
-		if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		if s.loopReferenceReview() {
+			reviewTool, err = utils.InferEnhancedTool(loopReviewTool, "一次独立语义审读：evidence_refs选择实际tN或帧ID，由程序绑定原文；局部AC02用coverage_questions，完整正文检查裁定coverage_decisions。", func(context.Context, domain.ArticleReferenceReport) (*schema.ToolResult, error) { return nil, nil })
+		} else if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 			reviewTool, err = utils.InferEnhancedTool(loopReviewTool, "独立综合核验AC02–07：先记录每个实际像素的独立可见事实与不确定性，再对照visual_claims、原文和全片主题，提交完成状态及具体blocking/advisory问题。无依据的具体图注或视觉断言为AC05 blocking。不要返回身份哈希或逐段supported。", func(context.Context, domain.ArticleGroundedReviewReport) (*schema.ToolResult, error) { return nil, nil })
 		} else {
 			reviewTool, err = utils.InferEnhancedTool(loopReviewTool, "独立综合核验。逐项执行AC02–07，完整性、未核验范围、主题到章节映射和具体blocking/advisory问题。没有问题不等于完成；不要返回身份哈希。", func(context.Context, domain.ArticleReviewReport) (*schema.ToolResult, error) { return nil, nil })
@@ -255,7 +257,11 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			return nil, err
 		}
 	} else {
-		if s.loopEvidenceReview() {
+		if s.loopReferenceReview() {
+			if err := add(utils.InferEnhancedTool(loopChallengeTool, "对全部剩余阻断提交实际已交付tN的evidence_refs反证；程序绑定原文，只有独立复核能撤回问题。同一候选只允许一次异议。", func(context.Context, loopReferenceChallengeInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
+				return nil, err
+			}
+		} else if s.loopEvidenceReview() {
 			if err := add(utils.InferEnhancedTool(loopChallengeTool, "对当前全部剩余阻断提交有原文逐字反证的异议。不会直接关闭问题或批准；独立核验者必须重新对照。相同候选只允许一次异议。确有缺陷先修稿。", func(context.Context, loopChallengeInput) (*schema.ToolResult, error) { return nil, nil })); err != nil {
 				return nil, err
 			}
@@ -292,6 +298,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			return nil, err
 		}
 		v2 := s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2
+		if s.deliveryFirst() && info.Name == loopFinishTool {
+			info.Desc = "完成写作后请求交付当前完整文章；基本结构和真实资源检查后即可阅读和导出，审核在交付后独立进行。"
+		}
 		if v2 && info.Name == "stop_article" {
 			info.Desc = "关键内容确实缺少证据、无法忠实成文时停止并保留成果。缺少可用解释配图不构成停止原因，允许少图或无图完成文章。"
 		}
@@ -304,7 +313,7 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		if s.loopEditorialReview() && info.Name == loopPatchTool {
 			info.Desc += loopExclusivePatchInstructions
 		}
-		if info.Name == loopSaveTool || v2 {
+		if info.Name == loopSaveTool || v2 || info.Name == loopReviewTool {
 			// The semantic input type owns the shape; the canonical domain owns
 			// the accepted limitation vocabulary. Publish that same vocabulary
 			// in the actual wire schema, rather than rejecting hidden enum values.
@@ -315,6 +324,23 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			var root map[string]any
 			if err = json.Unmarshal(domain.JSON(sc), &root); err != nil {
 				return nil, err
+			}
+			if info.Name == loopReviewTool && !s.loopReferenceReview() {
+				props, _ := root["properties"].(map[string]any)
+				delete(props, "coverage_questions")
+				delete(props, "coverage_decisions")
+				if required, ok := root["required"].([]any); ok {
+					kept := []any{}
+					for _, name := range required {
+						if name != "coverage_questions" && name != "coverage_decisions" {
+							kept = append(kept, name)
+						}
+					}
+					root["required"] = kept
+				}
+			}
+			if info.Name == loopReviewTool && s.loopReferenceReview() {
+				loopReferenceQuestionSchema(root)
 			}
 			if info.Name == loopSaveTool || info.Name == loopPatchTool {
 				loopLimitationSchema(root)
@@ -331,7 +357,7 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 				if info.Name == loopSaveTool {
 					if order, ok := props["order"].(map[string]any); ok {
 						order["description"] = "All retained stable section IDs exactly once after this action, including unchanged chapters. May combine with replacements/deletions atomically. For new chapters use a separate later reorder after receiving stable IDs."
-						if s.loopConvergence() {
+						if s.loopConvergence() || s.cp.ArticleLoop != nil && (s.deliveryFirst() && s.cp.ArticleLoop.ReviewRevision != domain.ArticleDeliveryV1) {
 							order["description"] = "Every retained chapter exactly once: use existing stable IDs, or the exact creation key from this same action for a newly created chapter. The program resolves creation keys atomically; never invent stable IDs."
 						}
 					}
@@ -350,6 +376,40 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+// Coverage obligations acquire their durable identity only after admission.
+// Exposing the stored record shape invited the model to populate identities
+// that the admission contract correctly refuses to trust.
+func loopReferenceQuestionSchema(node map[string]any) {
+	props, _ := node["properties"].(map[string]any)
+	if props["checked_block_ids"] != nil && props["required_placement"] != nil && props["topic"] != nil {
+		for _, name := range []string{"id", "origin_scope", "origin_candidate"} {
+			delete(props, name)
+		}
+		if required, ok := node["required"].([]any); ok {
+			kept := []any{}
+			for _, name := range required {
+				if name != "id" && name != "origin_scope" && name != "origin_candidate" {
+					kept = append(kept, name)
+				}
+			}
+			node["required"] = kept
+		}
+		node["additionalProperties"] = false
+	}
+	for _, value := range node {
+		switch child := value.(type) {
+		case map[string]any:
+			loopReferenceQuestionSchema(child)
+		case []any:
+			for _, item := range child {
+				if object, ok := item.(map[string]any); ok {
+					loopReferenceQuestionSchema(object)
+				}
+			}
+		}
+	}
 }
 
 // Express the same sum type the canonical constructor checks. Merely listing
@@ -739,6 +799,7 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		}
 	}
 	for i, insec := range in.Sections {
+		insec = s.deliverySection(insec, catalog)
 		id := insec.SectionID
 		if insec.rejected != "" || insec.SectionID == "" && insec.Key == "" {
 			reason := insec.rejected
@@ -836,7 +897,7 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		}
 		next := []domain.Section{}
 		for _, id := range order {
-			if s.loopConvergence() {
+			if s.loopConvergence() || s.cp.ArticleLoop != nil && (s.deliveryFirst() && s.cp.ArticleLoop.ReviewRevision != domain.ArticleDeliveryV1) {
 				if created := receipt.Created[id]; created != "" {
 					if _, ambiguous := available[id]; ambiguous {
 						return map[string]any{"error": "ambiguous creation key in order", "id": id}, false, nil
@@ -856,6 +917,9 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 	}
 	if len(d.Article.Sections) > 40 {
 		return map[string]any{"error": "resource_limit", "limit": "40 total sections"}, false, nil
+	}
+	if s.deliveryNavigation() {
+		compactDeliveryCitations(&d.Article, s.transcript)
 	}
 	// Keep exactly the content dependencies, including scoped limitations.
 	used := map[string]bool{}

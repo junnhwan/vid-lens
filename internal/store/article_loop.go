@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"vidlens/internal/domain"
@@ -18,10 +19,18 @@ func articleLoopGateError() error {
 // candidate replay entrance nor a direct Store caller can bypass this check.
 func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim, a domain.Article) error {
 	var cp struct {
-		Contract domain.ExecutionContract `json:"execution_contract"`
-		Loop     *struct {
-			CandidateHash  string `json:"candidate_hash"`
-			ReviewRevision string `json:"review_revision"`
+		Contract       domain.ExecutionContract `json:"execution_contract"`
+		DeliveryPolicy string                   `json:"article_delivery_policy"`
+		Loop           *struct {
+			CandidateHash       string                           `json:"candidate_hash"`
+			DraftVersion        int                              `json:"draft_version"`
+			EvidenceFingerprint string                           `json:"evidence_fingerprint"`
+			PolicyRevision      string                           `json:"policy_revision"`
+			SeenFrames          []string                         `json:"seen_frames"`
+			ReviewRevision      string                           `json:"review_revision"`
+			ReferenceStageKey   string                           `json:"reference_stage_key"`
+			CoverageQuestions   []domain.ArticleCoverageQuestion `json:"coverage_questions"`
+			SourcePlans         []string                         `json:"source_plans"`
 		} `json:"article_loop"`
 	}
 	if err := tx.QueryRow(ctx, "SELECT checkpoint FROM job_runs WHERE id=$1 FOR UPDATE", c.Run.ID).Scan(&cp); err != nil {
@@ -40,6 +49,12 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	candidate, err := one[domain.Article](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND status='completed'", c.Run.ID, "article-loop:candidate:"+h)
 	if err != nil || domain.ArticleHash(candidate) != h {
 		return articleLoopGateError()
+	}
+	if domain.ArticleDeliveryPolicy(cp.Loop.ReviewRevision) {
+		if cp.DeliveryPolicy != cp.Loop.ReviewRevision {
+			return articleLoopGateError()
+		}
+		return verifyDeliveryPublication(ctx, tx, c, a, cp.Loop.DraftVersion, cp.Loop.EvidenceFingerprint, cp.Loop.PolicyRevision, cp.Loop.SeenFrames, cp.Loop.ReviewRevision)
 	}
 	approval, err := one[domain.ArticleApproval](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_approval' AND status='completed'", c.Run.ID, "article-loop:approval:"+h)
 	if err != nil || approval.CandidateHash != h || len(approval.ReviewKeys) == 0 {
@@ -88,9 +103,15 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	if approval.EvidenceFingerprint != evidence || approval.PolicyRevision != policy {
 		return articleLoopGateError()
 	}
+	if domain.ArticleReferenceReview(cp.Loop.ReviewRevision) && cp.Loop.ReferenceStageKey != "" {
+		return articleLoopGateError()
+	}
 	sections, sources, frames := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	global := false
 	seen := map[string]bool{}
+	referenceStages := map[string]bool{}
+	var currentCoverage []domain.ArticleCoverageDecision
+	globalRelations := false
 	for _, key := range approval.ReviewKeys {
 		if seen[key] {
 			return articleLoopGateError()
@@ -105,6 +126,30 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 		}
 		if cp.Contract.Version == domain.ArticleLoopV2 && domain.ValidateArticleReviewSeverity(record.Report.Issues) != nil {
 			return articleLoopGateError()
+		}
+		if domain.ArticleReferenceReview(cp.Loop.ReviewRevision) {
+			original := record
+			originalArticle := a
+			if record.ReusedFrom != "" {
+				original, e = one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, record.ReusedFrom)
+				if e != nil {
+					return articleLoopGateError()
+				}
+				originalArticle, e = one[domain.Article](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_candidate' AND status='completed'", c.Run.ID, "article-loop:candidate:"+original.CandidateHash)
+				if e != nil || domain.ContentHash(record.Admission) != domain.ContentHash(original.Admission) {
+					return articleLoopGateError()
+				}
+			}
+			if err := verifyReferenceReview(ctx, tx, c.Run.ID, original, originalArticle, snap, transcript); err != nil {
+				return err
+			}
+			if record.Admission.Ticket != nil {
+				referenceStages[record.Admission.Ticket.ID] = true
+			}
+			if record.Scope.Global {
+				currentCoverage = append(currentCoverage, record.Report.CoverageDecisions...)
+				globalRelations = globalRelations || !record.Scope.CoverageBatch || len(record.Scope.CoverageQuestionIDs) == 0 || domain.ArticleWorkPlannedReview(cp.Loop.ReviewRevision) && record.Scope.FullRelations
+			}
 		}
 		if domain.ArticleEvidenceReview(cp.Loop.ReviewRevision) && record.ReusedFrom == "" {
 			var prior domain.ArticleReviewRecord
@@ -210,6 +255,75 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	}
 	if !global {
 		return articleLoopGateError()
+	}
+	if domain.ArticleReferenceReview(cp.Loop.ReviewRevision) {
+		if !globalRelations {
+			return articleLoopGateError()
+		}
+		history, e := many[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_loop_review' AND status='completed'", c.Run.ID)
+		if e != nil {
+			return e
+		}
+		questions := map[string]domain.ArticleCoverageQuestion{}
+		for _, r := range history {
+			if r.ReusedFrom == "" && (len(r.Report.CoverageQuestions) > 0 || r.Admission != nil && r.Admission.Ticket != nil) {
+				original, e := one[domain.Article](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_candidate' AND status='completed'", c.Run.ID, "article-loop:candidate:"+r.CandidateHash)
+				if e != nil {
+					return articleLoopGateError()
+				}
+				if e = verifyReferenceReview(ctx, tx, c.Run.ID, r, original, snap, transcript); e != nil {
+					return e
+				}
+			}
+			if r.Admission != nil && r.Admission.Ticket != nil {
+				referenceStages[r.Admission.Ticket.ID] = true
+			}
+			for _, q := range r.Report.CoverageQuestions {
+				if old, ok := questions[q.ID]; ok && domain.ContentHash(old) != domain.ContentHash(q) {
+					return articleLoopGateError()
+				}
+				questions[q.ID] = q
+			}
+		}
+		if domain.ArticleSourceFirstReview(cp.Loop.ReviewRevision) {
+			plans, e := verifyArticleSourcePlans(ctx, tx, c.Run.ID, snap, transcript, policy, cp.Loop.ReviewRevision, cp.Loop.SourcePlans)
+			if e != nil {
+				return e
+			}
+			for _, q := range plans {
+				if _, duplicate := questions[q.ID]; duplicate {
+					return articleLoopGateError()
+				}
+				questions[q.ID] = q
+			}
+		}
+		if len(cp.Loop.CoverageQuestions) != len(questions) {
+			return articleLoopGateError()
+		}
+		for _, q := range cp.Loop.CoverageQuestions {
+			if domain.ContentHash(q) != domain.ContentHash(questions[q.ID]) {
+				return articleLoopGateError()
+			}
+		}
+		if len(currentCoverage) != len(questions) {
+			return articleLoopGateError()
+		}
+		for _, decision := range currentCoverage {
+			if _, ok := questions[decision.QuestionID]; !ok || decision.Outcome != "covered" {
+				return articleLoopGateError()
+			}
+			delete(questions, decision.QuestionID)
+		}
+		stages, e := many[Operation](ctx, tx, "SELECT to_jsonb(o) FROM run_operations o WHERE run_id=$1 AND kind='article_reference_stage'", c.Run.ID)
+		if e != nil {
+			return e
+		}
+		for _, stage := range stages {
+			const prefix = "article-loop:reference-stage:"
+			if !strings.HasPrefix(stage.Key, prefix) || !referenceStages[strings.TrimPrefix(stage.Key, prefix)] {
+				return articleLoopGateError()
+			}
+		}
 	}
 	for _, section := range a.Sections {
 		if !sections[section.ID] {

@@ -26,7 +26,7 @@ func (s *session) loopEvidenceReview() bool {
 }
 
 func (s *session) loopEditorialReview() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV5
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV5 || s.loopReferenceReview())
 }
 
 const loopEditorialReviewInstructions = `
@@ -77,7 +77,11 @@ func (s *session) retainedLoopScopes(a domain.Article) []domain.ArticleReviewSco
 		}
 	}
 	out := []domain.ArticleReviewScope{}
+	resetBatches := s.loopReferenceReview() && !s.loopWorkPlannedReview() && slices.ContainsFunc(plan, func(sc domain.ArticleReviewScope) bool { return sc.CoverageBatch })
 	for _, sc := range plan {
+		if resetBatches && sc.Global {
+			continue
+		}
 		sc.FrameIDs = nil
 		if !(sc.Global && len(sc.SourceIDs) == 0) {
 			for _, sec := range a.Sections {
@@ -90,6 +94,14 @@ func (s *session) retainedLoopScopes(a domain.Article) []domain.ArticleReviewSco
 		}
 		sc = s.loopScopeContext(a, sc)
 		out = append(out, sc)
+	}
+	if resetBatches {
+		global := domain.ArticleReviewScope{Global: true}
+		for _, sec := range a.Sections {
+			global.SectionIDs = append(global.SectionIDs, sec.ID)
+		}
+		global.ID = store.Hash(global)[:24]
+		out = append(out, global)
 	}
 	return out
 }

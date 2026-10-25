@@ -11,6 +11,7 @@ import { ShareControl } from "./ShareControl"
 import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
 import { ArticleOutline } from "./ArticleOutline"
+import { ArticleReviewPanel } from "./ArticleReviewPanel"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -346,6 +347,7 @@ export function ReadView(props: {
                   </ul>
                 </div>
               ) : null}
+              {article && props.view?.request.id && !props.preview ? <ArticleReviewPanel key={article.id} requestId={props.view.request.id} csrf={props.csrf} onJump={jump} /> : null}
             </div>
           </article>
         </div>

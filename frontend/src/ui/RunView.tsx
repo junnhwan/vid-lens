@@ -11,6 +11,7 @@ import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
 import { ShareControl } from "./ShareControl"
 import { WaitTips } from "./WaitTips"
+import { DraftPreview } from "./DraftPreview"
 
 export function RunView({
   view,
@@ -378,6 +379,7 @@ export function RunView({
               </button>
             </p>
           ) : null}
+          {view && !holding && view.request.status !== "completed" ? <DraftPreview key={view.request.id} requestId={view.request.id} status={view.request.status} onOpenFrame={onOpenFrame} onBroken={onBroken} /> : null}
           <FrameTimeline
             duration={source?.duration_ms}
             ranges={ranges}

@@ -41,3 +41,13 @@ it("shows saved chapters without inventing a total and returns review to pending
   expect(html).not.toContain("stroke-dasharray")
   expect(html).toMatch(/data-state="pending"[^]*独立核验当前候选/)
 })
+
+it("does not describe independent advice as a delivery gate", () => {
+  const activity = { plan: { open_ended: true, items: [{ id: "write", title: "分章保存完整文章", status: "active" }, { id: "publish", title: "交付阅读和导出", status: "pending" }], sections: [{ id: "s1", title: "已保存主题", status: "done" }] } } as ActivitySummary
+  const html = renderToStaticMarkup(<ExecutionPlan activity={activity} completed={false} />)
+  expect(html).toContain("已保存 1 章，正在继续生成")
+  expect(html).not.toContain("还需核验")
+  const published = renderToStaticMarkup(<ExecutionPlan activity={activity} completed />)
+  expect(published).toContain("已完成 1 章，可阅读和导出")
+  expect(published).not.toContain("核验已完成")
+})

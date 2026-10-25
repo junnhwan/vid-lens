@@ -78,8 +78,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 28 {
-		t.Fatalf("expected 28 registered migrations, got %v", versions)
+	if len(versions) != 29 {
+		t.Fatalf("expected 29 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -158,6 +158,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 			}
 			if version < 28 {
 				if _, err := s.Pool.Exec(ctx, "ALTER TABLE model_probes DROP COLUMN IF EXISTS started_at"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if version < 29 {
+				if _, err := s.Pool.Exec(ctx, "DROP TABLE article_reviews"); err != nil {
 					t.Fatal(err)
 				}
 			}

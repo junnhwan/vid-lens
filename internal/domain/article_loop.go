@@ -23,18 +23,22 @@ func ArticleConvergenceReview(revision string) bool {
 
 // Later guidance revisions retain every evidence and reconciliation gate.
 func ArticleEvidenceReview(revision string) bool {
-	return revision == ArticleConvergenceReviewV4 || revision == ArticleConvergenceReviewV5
+	return revision == ArticleConvergenceReviewV4 || revision == ArticleConvergenceReviewV5 || ArticleReferenceReview(revision)
 }
 
 // These identities are owned by the program, never accepted from author tools.
 type ArticleReviewScope struct {
-	ID               string   `json:"id"`
-	SectionIDs       []string `json:"section_ids"`
-	SourceIDs        []string `json:"source_ids"`
-	ContextSourceIDs []string `json:"context_source_ids,omitempty"`
-	FrameIDs         []string `json:"frame_ids"`
-	Global           bool     `json:"global"`
-	BoundedContext   bool     `json:"bounded_context,omitempty"`
+	ID                  string   `json:"id"`
+	SectionIDs          []string `json:"section_ids"`
+	SourceIDs           []string `json:"source_ids"`
+	ContextSourceIDs    []string `json:"context_source_ids,omitempty"`
+	FrameIDs            []string `json:"frame_ids"`
+	Global              bool     `json:"global"`
+	BoundedContext      bool     `json:"bounded_context,omitempty"`
+	ContextBlockIDs     []string `json:"context_block_ids,omitempty"`
+	CoverageBatch       bool     `json:"coverage_batch,omitempty"`
+	CoverageQuestionIDs []string `json:"coverage_question_ids,omitempty"`
+	FullRelations       bool     `json:"full_relations,omitempty"`
 }
 type ArticleEvidenceQuote struct {
 	SourceID string `json:"source_id" jsonschema:"description=Delivered tN alias or exact original ID"`
@@ -71,11 +75,13 @@ type ArticleReviewResolution struct {
 }
 
 type ArticleReviewReport struct {
-	Resolutions []ArticleReviewResolution `json:"resolutions,omitempty" jsonschema:"description=Resolve every unresolved_findings issue_id exactly once: fixed only after a real candidate change, withdrawn only after checking counter-evidence, remaining requires a blocking issue. No silent omission."`
-	Complete    bool                      `json:"complete" jsonschema:"description=True only when all required semantic review obligations are assessed; requires unassessed to be an empty array"`
-	Unassessed  []string                  `json:"unassessed" jsonschema:"description=Only required review obligations that remain unassessed. Must be empty when complete is true. Material already classified as irrelevant is assessed, not an unassessed obligation; optional observations belong in advisory issues"`
-	Topics      []ArticleTopic            `json:"topics" jsonschema:"description=Major source topics and substantive candidate locations; include the end of the video"`
-	Issues      []ArticleReviewIssue      `json:"issues"`
+	CoverageQuestions []ArticleCoverageQuestion `json:"coverage_questions,omitempty"`
+	CoverageDecisions []ArticleCoverageDecision `json:"coverage_decisions,omitempty"`
+	Resolutions       []ArticleReviewResolution `json:"resolutions,omitempty" jsonschema:"description=Resolve every unresolved_findings issue_id exactly once: fixed only after a real candidate change, withdrawn only after checking counter-evidence, remaining requires a blocking issue. No silent omission."`
+	Complete          bool                      `json:"complete" jsonschema:"description=True only when all required semantic review obligations are assessed; requires unassessed to be an empty array"`
+	Unassessed        []string                  `json:"unassessed" jsonschema:"description=Only required review obligations that remain unassessed. Must be empty when complete is true. Material already classified as irrelevant is assessed, not an unassessed obligation; optional observations belong in advisory issues"`
+	Topics            []ArticleTopic            `json:"topics" jsonschema:"description=Major source topics and substantive candidate locations; include the end of the video"`
+	Issues            []ArticleReviewIssue      `json:"issues"`
 }
 
 // Observations are the reviewer's direct account of delivered pixels, never
@@ -110,6 +116,7 @@ type ArticleReviewRecord struct {
 	ReusedFrom           string                     `json:"reused_from,omitempty"`
 	ReuseKind            string                     `json:"reuse_kind,omitempty"`
 	Delta                *ArticleReviewDelta        `json:"delta,omitempty"`
+	Admission            *ArticleReviewAdmission    `json:"admission,omitempty"`
 }
 type ArticleApproval struct {
 	CandidateHash       string   `json:"candidate_hash"`
@@ -202,13 +209,17 @@ func ArticleReviewMaterialIdentity(a Article, scope ArticleReviewScope, snap Sna
 			frames = append(frames, asset)
 		}
 	}
-	return ContentHash(struct {
+	identity := ContentHash(struct {
 		Article, Evidence string
 		Scope             ArticleReviewScope
 		Structure         [][2]string
 	}{
 		ArticleHash(projected), ArticleEvidenceIdentity(snap, text, frames), scope, structure,
 	})
+	if len(scope.ContextBlockIDs) > 0 {
+		return ContentHash([]string{identity, ContentHash(ArticleReviewContextBlocks(a, scope.ContextBlockIDs))})
+	}
+	return identity
 }
 
 // ValidateArticleVisualObservations checks coverage and evidence identities.

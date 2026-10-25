@@ -292,7 +292,10 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 				defer release()
 				sub, cc := context.WithTimeout(dctx, 20*time.Minute)
 				defer cc()
-				audioErr = s.downloadStreamFromInfo(sub, ident.URL, youtubeAudioFormat, prefetchedAudio, min(p.MaxDownloadBytes, 64<<20), sourceInfo)
+				// Long lectures can have an audio track larger than 64MiB while
+				// their complete video and audio still fit the source budget.
+				// The combined-size check below and workspace limit remain in force.
+				audioErr = s.downloadStreamFromInfo(sub, ident.URL, youtubeAudioFormat, prefetchedAudio, p.MaxDownloadBytes, sourceInfo)
 			}()
 		}
 		if e = advance("正在获取用于观察的完整视频"); e != nil {

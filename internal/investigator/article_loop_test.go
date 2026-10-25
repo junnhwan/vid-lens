@@ -45,14 +45,20 @@ func loopPayload(t *testing.T, r *http.Request) map[string]json.RawMessage {
 	p := payload
 	if p["snapshot_id"] != nil {
 		var limits struct {
-			Output     int   `json:"output_tokens"`
-			Timeout    int64 `json:"response_timeout_ms"`
-			WriteBytes int   `json:"max_write_bytes"`
+			Policy     string `json:"response_policy"`
+			Output     int    `json:"output_tokens"`
+			Timeout    int64  `json:"response_timeout_ms"`
+			WriteBytes int    `json:"max_write_bytes"`
 		}
-		if err := json.Unmarshal(p["current_call"], &limits); err != nil || limits.Output != req.MaxTokens || limits.Timeout != 300000 || limits.WriteBytes != loopWriteBytes {
+		err := json.Unmarshal(p["current_call"], &limits)
+		wantTimeout := int64(300000)
+		if limits.Policy == streamProgressPolicy {
+			wantTimeout = 600000
+		}
+		if err != nil || limits.Output != req.MaxTokens || limits.Timeout != wantTimeout || limits.WriteBytes != loopWriteBytes {
 			t.Error("visible call limits differ from actual provider/write limits", limits, req.MaxTokens, err)
 		}
-		if p["scope"] == nil && p["frame_index_navigation_only"] == nil {
+		if p["scope"] == nil && p["frame_index_navigation_only"] == nil && string(p["material_role"]) != `"source_requirements"` {
 			t.Error("author cannot reload prior pixels without a frame navigation ledger")
 		}
 		return p
@@ -101,7 +107,7 @@ func loopGoodReport(t *testing.T, p map[string]json.RawMessage) domain.ArticleGr
 	}
 	return domain.ArticleGroundedReviewReport{VisualObservations: observations, ArticleReviewReport: domain.ArticleReviewReport{Resolutions: resolutions, Complete: true, Unassessed: []string{}, Topics: []domain.ArticleTopic{{Topic: "合成来源事实与后半段结尾", SourceIDs: refs, SectionIDs: scope.SectionIDs}}, Issues: []domain.ArticleReviewIssue{}}}
 }
-func loopFixture(t *testing.T, handler http.HandlerFunc) *session {
+func loopFixture(t *testing.T, handler http.HandlerFunc, revisions ...string) *session {
 	t.Helper()
 	s, _ := publicationReviewFixture(t, handler)
 	// Populate a real read/export source shape; the older publication-only
@@ -120,6 +126,18 @@ func loopFixture(t *testing.T, handler http.HandlerFunc) *session {
 	s.cp = checkpoint{SchemaVersion: 1, ExecutionContract: &domain.ExecutionContract{Version: domain.ArticleLoopV2, RunID: s.claim.Run.ID}}
 	s.profile.MaxOutputTokens = 32768
 	s.profile.ArticleHarness = domain.ArticleLoopV2
+	// Existing fixtures exercise the frozen v5 wire. New revision tests opt in;
+	// admission itself defaults to v6 through initializeArticleLoop.
+	s.initializeArticleLoop()
+	s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV5
+	if len(revisions) > 0 {
+		s.cp.ArticleLoop.ReviewRevision = revisions[0]
+		if domain.ArticleDeliveryPolicy(revisions[0]) {
+			s.cp.ArticleDeliveryPolicy = revisions[0]
+			s.cp.ArticleLoop.OutputTokens = min(s.profile.MaxOutputTokens, 8192)
+			s.cp.ArticleLoop.OutputSections = 2
+		}
+	}
 	if _, err := s.engine.Store.Pool.Exec(context.Background(), "UPDATE runtime_config_revisions SET profile=$2 WHERE id=$1", s.claim.Run.ConfigID, domain.JSON(s.profile)); err != nil {
 		t.Fatal(err)
 	}
@@ -577,6 +595,12 @@ func TestArticleLoopT12TooSmallCapacityStopsBeforeSending(t *testing.T) {
 	var calls atomic.Int32
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) })
 	s.profile.InputCharsLimit = 1000
+	s.initializeArticleLoop()
+	s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV5
+	if err := s.engine.Store.Checkpoint(context.Background(), s.claim, s.cp); err != nil {
+		t.Fatal(err)
+	}
+	s = reloadLoopSession(t, s)
 	if _, err := s.engine.Store.Pool.Exec(context.Background(), "UPDATE runtime_config_revisions SET profile=$2 WHERE id=$1", s.claim.Run.ConfigID, domain.JSON(s.profile)); err != nil {
 		t.Fatal(err)
 	}

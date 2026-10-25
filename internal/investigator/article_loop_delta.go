@@ -44,6 +44,9 @@ func (s *session) loopReviewDelta(ctx context.Context, a domain.Article, scope d
 	if !s.loopEvidenceReview() && !domain.ArticleReviewCoversWhole(parent.Scope, before, s.transcript, store.ContentFrameIDs(before.Sections, before.Citations)) {
 		return nil, nil
 	}
+	if s.loopReferenceReview() && domain.ContentHash(domain.ArticleReviewContextBlocks(before, scope.ContextBlockIDs)) != domain.ContentHash(domain.ArticleReviewContextBlocks(a, scope.ContextBlockIDs)) {
+		return nil, nil
+	}
 	delta, ok := domain.ArticleReviewDeltaFor(key, parent, before, a)
 	if s.loopEvidenceReview() {
 		delta, ok = domain.ArticleScopedReviewDeltaFor(key, parent, before, a, scope)

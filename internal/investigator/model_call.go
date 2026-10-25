@@ -23,6 +23,9 @@ type meteredModel struct {
 }
 
 func (s *session) responseLimits() modelResponseLimits {
+	if p := s.responsePolicy(); p != nil {
+		return p.limits()
+	}
 	limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
 	if s.compositionReady || s.reviewStep != nil || s.workflowStep != nil || s.articleCall != nil || s.articleLoop() {
 		limits.Total = 300 * time.Second
@@ -95,6 +98,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	}
 	inputChars := utf8.RuneCount(domain.JSON(args)) + bound.(*meteredModel).toolsChars
 	var budget callBudget
+	responsePolicy := s.responsePolicy()
 	outputTokens := s.profile.MaxOutputTokens
 	if s.policy().Enabled {
 		var frozen frozenModelInput
@@ -121,6 +125,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if e != nil {
 			return nil, e
 		}
+		if domain.ContentHash(frozen.ResponsePolicy) != domain.ContentHash(responsePolicy) {
+			return nil, loopStop("MODEL_INPUT_CONFLICT", "冻结调用的响应预算不一致，不重新发送")
+		}
+		responsePolicy = frozen.ResponsePolicy
 		// PostgreSQL jsonb reorders object keys. Decode back to a canonical map
 		// before hashing; hashing RawMessage bytes would conflict on takeover.
 		if e = json.Unmarshal(frozen.Args, &args); e != nil {
@@ -179,7 +187,14 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 	}
 	if s.articleLoop() {
-		limited, err := s.engine.Store.ModelResponseBudgetExhausted(ctx, s.claim.Run.ID, key)
+		limited, err := s.engine.Store.ModelCallBudgetExhausted(ctx, s.claim.Run.ID, key)
+		if err != nil {
+			return nil, err
+		}
+		if limited {
+			return nil, &domain.WorkError{Code: "MODEL_CALL_BUDGET_EXHAUSTED", Message: "冻结调用的总时长预算已用尽，未完成结果保留为未知，不重新发送。"}
+		}
+		limited, err = s.engine.Store.ModelResponseBudgetExhausted(ctx, s.claim.Run.ID, key)
 		if err != nil {
 			return nil, err
 		}
@@ -301,6 +316,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.authoring() {
 			baseCtx = context.WithValue(ctx, nativeStrictKey{}, true)
 		}
+		if responsePolicy != nil {
+			baseCtx = context.WithValue(baseCtx, responsePolicyKey{}, responsePolicy)
+		}
 		base, err := s.engine.baseModel(baseCtx, p)
 		if err == nil && activeTools != nil {
 			base, err = base.WithTools(activeTools)
@@ -331,6 +349,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				slog.Warn("model usage observation unavailable")
 			}
 		})
+		observer.report.ResponsePolicy = responsePolicy
 		var submitErr error
 		sub := context.WithValue(actx, usageKey{}, observer)
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
@@ -340,6 +359,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 					return err
 				}
 				ceiling := min(20, s.profile.MaxIterations)
+				if s.articleLoop() && s.cp.ArticleLoop != nil {
+					ceiling = min(ceiling, s.cp.ArticleLoop.Budget.Sends)
+				}
 				if s.turn != nil {
 					ceiling = min(3, ceiling)
 				}
@@ -394,8 +416,14 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			options = append(options, model.WithTools(activeTools))
 		}
 		if s.articleCall != nil {
-			if s.articleCall.Mode == "review" {
-				options = append(options, model.WithToolChoice(schema.ToolChoiceForced, loopReviewTool))
+			if s.articleCall.Mode == "source" {
+				options = append(options, model.WithToolChoice(schema.ToolChoiceForced, loopSourceTool))
+			} else if s.articleCall.Mode == "review" {
+				name := loopReviewTool
+				if s.articleCall.ReferenceRepairKey != "" {
+					name = loopReferenceRepairTool
+				}
+				options = append(options, model.WithToolChoice(schema.ToolChoiceForced, name))
 			} else {
 				options = append(options, model.WithToolChoice(schema.ToolChoiceForced))
 			}

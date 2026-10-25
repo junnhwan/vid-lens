@@ -23,38 +23,44 @@ type tokenMetric struct {
 	Path   string `json:"source_path,omitempty"`
 }
 type usageReport struct {
-	PixelInputs          []pixelInputReceipt `json:"pixel_inputs,omitempty"`
-	StartedAt            time.Time           `json:"response_started_at"`
-	FinishedAt           *time.Time          `json:"response_finished_at"`
-	Schema               string              `json:"schema"`
-	Input                tokenMetric         `json:"input"`
-	Output               tokenMetric         `json:"output"`
-	Total                tokenMetric         `json:"total"`
-	CacheRead            tokenMetric         `json:"cache_read"`
-	CacheWrite           tokenMetric         `json:"cache_write"`
-	Reasoning            tokenMetric         `json:"reasoning"`
-	RequestedOutput      *int64              `json:"requested_output_tokens,omitempty"`
-	ThinkingRequest      string              `json:"thinking_request"`
-	StreamStatus         string              `json:"stream_status"`
-	HTTPStatus           *int                `json:"http_status,omitempty"`
-	RequestID            string              `json:"request_id,omitempty"`
-	ResponseID           string              `json:"response_id,omitempty"`
-	ObservationStatus    string              `json:"observation_status"`
-	FinishReason         string              `json:"finish_reason,omitempty"`
-	FirstMeaningfulMS    *int64              `json:"first_meaningful_delta_ms"`
-	FirstByteMS          *int64              `json:"first_byte_ms"`
-	FirstResponseMS      *int64              `json:"first_response_ms"`
-	TotalMS              int64               `json:"total_ms"`
-	Layout               string              `json:"layout_version"`
-	ToolsHash            string              `json:"tools_hash,omitempty"`
-	StablePrefixHash     string              `json:"stable_prefix_hash,omitempty"`
-	CachePolicy          string              `json:"cache_policy"`
-	HintsSent            bool                `json:"hints_sent"`
-	CostReporting        string              `json:"cost_reporting"`
-	ProviderErrorType    string              `json:"provider_error_type,omitempty"`
-	ProviderErrorCode    string              `json:"provider_error_code,omitempty"`
-	ProviderErrorParam   string              `json:"provider_error_param,omitempty"`
-	ProviderErrorMessage string              `json:"provider_error_message,omitempty"`
+	ResponsePolicy       *modelResponsePolicy `json:"response_policy,omitempty"`
+	FirstActivityMS      *int64               `json:"first_activity_ms,omitempty"`
+	LastActivityMS       *int64               `json:"last_activity_ms,omitempty"`
+	FirstReasoningMS     *int64               `json:"first_reasoning_delta_ms,omitempty"`
+	LastReasoningMS      *int64               `json:"last_reasoning_delta_ms,omitempty"`
+	ReasoningDeltas      int64                `json:"reasoning_delta_count,omitempty"`
+	PixelInputs          []pixelInputReceipt  `json:"pixel_inputs,omitempty"`
+	StartedAt            time.Time            `json:"response_started_at"`
+	FinishedAt           *time.Time           `json:"response_finished_at"`
+	Schema               string               `json:"schema"`
+	Input                tokenMetric          `json:"input"`
+	Output               tokenMetric          `json:"output"`
+	Total                tokenMetric          `json:"total"`
+	CacheRead            tokenMetric          `json:"cache_read"`
+	CacheWrite           tokenMetric          `json:"cache_write"`
+	Reasoning            tokenMetric          `json:"reasoning"`
+	RequestedOutput      *int64               `json:"requested_output_tokens,omitempty"`
+	ThinkingRequest      string               `json:"thinking_request"`
+	StreamStatus         string               `json:"stream_status"`
+	HTTPStatus           *int                 `json:"http_status,omitempty"`
+	RequestID            string               `json:"request_id,omitempty"`
+	ResponseID           string               `json:"response_id,omitempty"`
+	ObservationStatus    string               `json:"observation_status"`
+	FinishReason         string               `json:"finish_reason,omitempty"`
+	FirstMeaningfulMS    *int64               `json:"first_meaningful_delta_ms"`
+	FirstByteMS          *int64               `json:"first_byte_ms"`
+	FirstResponseMS      *int64               `json:"first_response_ms"`
+	TotalMS              int64                `json:"total_ms"`
+	Layout               string               `json:"layout_version"`
+	ToolsHash            string               `json:"tools_hash,omitempty"`
+	StablePrefixHash     string               `json:"stable_prefix_hash,omitempty"`
+	CachePolicy          string               `json:"cache_policy"`
+	HintsSent            bool                 `json:"hints_sent"`
+	CostReporting        string               `json:"cost_reporting"`
+	ProviderErrorType    string               `json:"provider_error_type,omitempty"`
+	ProviderErrorCode    string               `json:"provider_error_code,omitempty"`
+	ProviderErrorParam   string               `json:"provider_error_param,omitempty"`
+	ProviderErrorMessage string               `json:"provider_error_message,omitempty"`
 }
 
 type pixelInputReceipt struct {
@@ -204,8 +210,10 @@ func (o *usageObserver) parse(b []byte) {
 		Choices []struct {
 			Finish string `json:"finish_reason"`
 			Delta  struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+				Content        string `json:"content"`
+				Reasoning      string `json:"reasoning_content"`
+				ReasoningExtra string `json:"reasoning-content"`
+				ToolCalls      []struct {
 					Function struct {
 						Name      string `json:"name"`
 						Arguments string `json:"arguments"`
@@ -228,6 +236,21 @@ func (o *usageObserver) parse(b []byte) {
 		meaningful := c.Delta.Content != ""
 		for _, tc := range c.Delta.ToolCalls {
 			meaningful = meaningful || tc.Function.Name != "" || tc.Function.Arguments != ""
+		}
+		thinking := c.Delta.Reasoning != "" || c.Delta.ReasoningExtra != ""
+		if meaningful || thinking {
+			n := time.Since(o.start).Milliseconds()
+			if o.report.FirstActivityMS == nil {
+				o.report.FirstActivityMS = &n
+			}
+			o.report.LastActivityMS = &n
+			if thinking {
+				if o.report.FirstReasoningMS == nil {
+					o.report.FirstReasoningMS = &n
+				}
+				o.report.LastReasoningMS = &n
+				o.report.ReasoningDeltas++
+			}
 		}
 		if meaningful && o.report.FirstMeaningfulMS == nil {
 			n := time.Since(o.start).Milliseconds()

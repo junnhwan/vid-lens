@@ -50,7 +50,7 @@ func New(s *store.Store, m *media.Service, a *investigator.Engine, c config.Conf
 		return nil, e
 	}
 	w := &Worker{Store: s, Media: m, Agent: a, Config: c, client: asynq.NewClient(opt), inspector: asynq.NewInspector(opt), owner: domain.ID()}
-	for _, queue := range []string{"generation", "interactive", "maintenance", "probes"} {
+	for _, queue := range []string{"generation", "interactive", "maintenance", "probes", "reviews"} {
 		queues := map[string]int{queue: 1}
 		concurrency := 1
 		if queue == "generation" {
@@ -90,6 +90,25 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.ctx = ctx
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("vidlens.run", w.handle)
+	mux.HandleFunc("article.review", func(ctx context.Context, t *asynq.Task) error {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(t.Payload(), &body) != nil {
+			return asynq.SkipRetry
+		}
+		r, err := w.Store.ClaimArticleReview(ctx, body.ID)
+		if errors.Is(err, store.ErrExecutionBusy) {
+			return errBusy
+		}
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			return nil
+		}
+		return w.Agent.RunArticleReview(ctx, *r)
+	})
 	mux.HandleFunc("model.probe", func(ctx context.Context, t *asynq.Task) error {
 		var body struct {
 			ID string `json:"id"`
@@ -173,6 +192,11 @@ func (w *Worker) Shutdown() {
 }
 func taskID(id string, generation int64) string { return fmt.Sprintf("vl:%s:%d", id, generation) }
 func (w *Worker) dispatch(ctx context.Context) {
+	if reviews, err := w.Store.PendingArticleReviews(ctx); err == nil {
+		for _, review := range reviews {
+			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("article.review", domain.JSON(map[string]string{"id": review.ID})), asynq.TaskID("review:"+review.ID), asynq.Queue("reviews"), asynq.MaxRetry(120), asynq.Timeout(store.ArticleReviewTimeout+5*time.Second), asynq.Deadline(review.DeadlineAt.Add(store.ArticleReviewTimeout)), asynq.Retention(24*time.Hour))
+		}
+	}
 	if exports, e := w.Store.PendingExports(ctx); e == nil {
 		for _, v := range exports {
 			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("article.export", domain.JSON(map[string]string{"id": v.ID})), asynq.TaskID(fmt.Sprintf("export:%s:%d", v.ID, v.Attempts)), asynq.Queue("maintenance"), asynq.MaxRetry(3), asynq.Timeout(2*time.Minute+5*time.Second), asynq.Deadline(v.DeadlineAt), asynq.Retention(24*time.Hour))

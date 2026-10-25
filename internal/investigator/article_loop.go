@@ -17,20 +17,21 @@ import (
 )
 
 type articleLoopBudget struct {
-	InputCharsLimit int       `json:"input_chars_limit"`
-	ContextTokens   int       `json:"context_tokens"`
-	MaxOutputTokens int       `json:"max_output_tokens"`
-	TokenCeiling    int64     `json:"token_ceiling,omitempty"`
-	CostStatus      string    `json:"cost_status"`
-	Calls           int       `json:"calls"`
-	Sends           int       `json:"sends"`
-	NoProgress      int       `json:"no_progress"`
-	Sections        int       `json:"sections"`
-	DraftBytes      int       `json:"draft_bytes"`
-	Revisions       int       `json:"revisions"`
-	MediaBytes      int       `json:"media_bytes"`
-	ActiveSeconds   int64     `json:"active_seconds"`
-	Deadline        time.Time `json:"deadline"`
+	ResponsePolicy  *modelResponsePolicy `json:"response_policy,omitempty"`
+	InputCharsLimit int                  `json:"input_chars_limit"`
+	ContextTokens   int                  `json:"context_tokens"`
+	MaxOutputTokens int                  `json:"max_output_tokens"`
+	TokenCeiling    int64                `json:"token_ceiling,omitempty"`
+	CostStatus      string               `json:"cost_status"`
+	Calls           int                  `json:"calls"`
+	Sends           int                  `json:"sends"`
+	NoProgress      int                  `json:"no_progress"`
+	Sections        int                  `json:"sections"`
+	DraftBytes      int                  `json:"draft_bytes"`
+	Revisions       int                  `json:"revisions"`
+	MediaBytes      int                  `json:"media_bytes"`
+	ActiveSeconds   int64                `json:"active_seconds"`
+	Deadline        time.Time            `json:"deadline"`
 }
 type articleLoopState struct {
 	Version              int                                    `json:"version"`
@@ -72,20 +73,31 @@ type articleLoopState struct {
 	Challenges           []loopReviewChallenge                  `json:"review_challenges,omitempty"`
 	ChallengeCandidate   string                                 `json:"challenge_candidate,omitempty"`
 	ReviewBaseKey        string                                 `json:"review_base_key,omitempty"`
+	ReferenceStageKey    string                                 `json:"reference_stage_key,omitempty"`
+	CoverageQuestions    []domain.ArticleCoverageQuestion       `json:"coverage_questions,omitempty"`
+	ReferenceChallenges  []loopReferenceChallenge               `json:"reference_challenges,omitempty"`
+	SourcePlans          []string                               `json:"source_plans,omitempty"`
+	PlannedSources       []string                               `json:"planned_sources,omitempty"`
+	ReviewClosures       int                                    `json:"review_closures,omitempty"`
+	StalledReviews       int                                    `json:"stalled_reviews,omitempty"`
 }
 type articleLoopCall struct {
-	Slot         int                        `json:"slot"`
-	Mode         string                     `json:"mode"`
-	Sections     []string                   `json:"sections,omitempty"`
-	Sources      []string                   `json:"sources"`
-	Frames       []string                   `json:"frames"`
-	Scope        *domain.ArticleReviewScope `json:"scope,omitempty"`
-	OutputTokens int                        `json:"output_tokens"`
-	Delta        *domain.ArticleReviewDelta `json:"delta,omitempty"`
+	Slot               int                        `json:"slot"`
+	Mode               string                     `json:"mode"`
+	Sections           []string                   `json:"sections,omitempty"`
+	Sources            []string                   `json:"sources"`
+	Frames             []string                   `json:"frames"`
+	Scope              *domain.ArticleReviewScope `json:"scope,omitempty"`
+	OutputTokens       int                        `json:"output_tokens"`
+	Delta              *domain.ArticleReviewDelta `json:"delta,omitempty"`
+	ReferenceRepairKey string                     `json:"reference_repair_key,omitempty"`
 }
 
 func (s *session) articleLoop() bool {
 	return s != nil && s.cp.ExecutionContract != nil && domain.ArticleLoopContract(s.cp.ExecutionContract.Version)
+}
+func (s *session) deliveryFirst() bool {
+	return s.cp.ArticleLoop != nil && domain.ArticleDeliveryPolicy(s.cp.ArticleLoop.ReviewRevision)
 }
 func (s *session) validateArticleLoopState() error {
 	l := s.cp.ArticleLoop
@@ -98,19 +110,58 @@ func (s *session) validateArticleLoopState() error {
 	if l.Version != 1 || l.Budget.Calls < 1 || l.Budget.Calls > min(20, s.profile.MaxIterations) || l.Budget.Sends != l.Budget.Calls || l.Budget.InputCharsLimit != separateInputLimit(s.profile) || l.Budget.ContextTokens != s.profile.ContextTokens || l.Budget.MaxOutputTokens != s.profile.MaxOutputTokens || l.Budget.CostStatus != "unknown" || l.Budget.NoProgress < 1 || l.Budget.NoProgress > 6 || l.Budget.DraftBytes != 512<<10 || l.Budget.Sections != 40 || l.Budget.Revisions != 48 || l.Budget.MediaBytes != 20<<20 || l.Budget.ActiveSeconds != s.profile.ArticleActiveSeconds || !l.Budget.Deadline.Equal(s.claim.Run.DeadlineAt) || l.Failures == nil || l.SourceChars < 1 || l.OutputSections < 1 || l.OutputTokens < 1 || s.cp.Calls < 0 || s.cp.Calls > l.Budget.Calls {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章循环冻结限制或检查点损坏。")
 	}
-	if l.Pending != nil && (l.Pending.Slot != s.cp.Calls-1 || l.Pending.Slot < 0 || (l.Pending.Mode != "author" && l.Pending.Mode != "review")) {
+	if l.Pending != nil && (l.Pending.Slot != s.cp.Calls-1 || l.Pending.Slot < 0 || (l.Pending.Mode != "author" && l.Pending.Mode != "review" && !(s.loopSufficientReview() && l.Pending.Mode == "source"))) {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章循环待完成调用身份损坏。")
 	}
 	if l.ReviewSourceLimit < 0 {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章核验工作范围损坏。")
 	}
-	if l.ReviewRevision != "" && !domain.ArticleConvergenceReview(l.ReviewRevision) || l.RepairRounds < 0 || l.RepairActions < 0 || l.ReviewWorkLimit < 0 || l.ReviewWorkLimit > loopReviewWorkRunes {
+	if l.Budget.ResponsePolicy != nil && !l.Budget.ResponsePolicy.valid() {
+		return domain.Err(422, "INTERNAL_FAILURE", "文章响应策略的冻结身份损坏。")
+	}
+	workLimit := loopReviewWorkRunes
+	if domain.ArticleWorkPlannedReview(l.ReviewRevision) {
+		workLimit = domain.ArticleReviewLocalWorkRunes
+	}
+	if l.ReviewRevision != "" && !domain.ArticleConvergenceReview(l.ReviewRevision) && !s.deliveryFirst() || l.RepairRounds < 0 || l.RepairActions < 0 || l.ReviewWorkLimit < 0 || l.ReviewWorkLimit > workLimit {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章收敛策略或修订账损坏。")
+	}
+	if s.loopSufficientReview() {
+		seen := map[string]bool{}
+		for _, ref := range l.PlannedSources {
+			if seen[ref] || !slices.Contains(s.loopAllSourceAliases(), ref) {
+				return loopStop("INTERNAL_FAILURE", "来源义务账重复或越界")
+			}
+			seen[ref] = true
+		}
+		if l.Budget.ResponsePolicy == nil || l.ReviewClosures < 0 || l.StalledReviews < 0 || len(l.SourcePlans) > len(l.PlannedSources) {
+			return loopStop("INTERNAL_FAILURE", "来源义务或收敛冻结账损坏")
+		}
 	}
 	return nil
 }
 func loopStop(code, message string) error {
 	return domain.Err(422, code, message+"；原文、稿件、回执和调用账均保留。")
+}
+func (s *session) initializeArticleLoop() {
+	limit := 6
+	if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.NoProgressLimit > 0 {
+		limit = min(limit, s.spec.DetailPolicy.NoProgressLimit)
+	}
+	s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
+	s.cp.ArticleLoop.Budget.ResponsePolicy = articleResponsePolicy()
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV13
+		s.cp.ArticleLoop.ReviewCache = map[string]string{}
+		if domain.ArticleDeliveryPolicy(s.cp.ArticleDeliveryPolicy) {
+			s.cp.ArticleLoop.ReviewRevision = s.cp.ArticleDeliveryPolicy
+			s.cp.ArticleLoop.OutputTokens = min(s.profile.MaxOutputTokens, 8192)
+			s.cp.ArticleLoop.OutputSections = 2
+		}
+	}
+	s.cp.Protocol = s.cp.ExecutionContract.Version
+	s.cp.LayoutVersion = "article-workspace-v1"
+	s.cp.Ready = true
 }
 func (s *session) runArticleLoop(ctx context.Context) error {
 	if op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "candidate"); err == nil && op.Status == "completed" {
@@ -132,18 +183,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 	}
 
 	if s.cp.ArticleLoop == nil {
-		limit := 6
-		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.NoProgressLimit > 0 {
-			limit = min(limit, s.spec.DetailPolicy.NoProgressLimit)
-		}
-		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
-		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV5
-			s.cp.ArticleLoop.ReviewCache = map[string]string{}
-		}
-		s.cp.Protocol = s.cp.ExecutionContract.Version
-		s.cp.LayoutVersion = "article-workspace-v1"
-		s.cp.Ready = true
+		s.initializeArticleLoop()
 		if err := s.persist(ctx, nil); err != nil {
 			return err
 		}
@@ -159,7 +199,10 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 			return err
 		}
 		l := s.cp.ArticleLoop
-		if l.CandidateHash != "" {
+		if s.deliveryFirst() && l.CandidateHash != "" && l.Pending == nil {
+			return s.publishLoopCandidate(ctx)
+		}
+		if l.CandidateHash != "" && (!s.loopReferenceReview() || l.Pending == nil) {
 			op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "article-loop:approval:"+l.CandidateHash)
 			if err == nil && op.Status == "completed" {
 				return s.publishLoopCandidate(ctx)
@@ -211,7 +254,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 			}
 			continue
 		}
-		infos, err := s.loopTools(pending.Mode == "review")
+		infos, err := s.loopCallTools(pending)
 		if err != nil {
 			return err
 		}
@@ -274,6 +317,9 @@ func appendUnique(values []string, value string) []string {
 	return values
 }
 func (s *session) loopSave(ctx context.Context, key, kind string, value any) error {
+	if s.loopReferenceReview() {
+		return s.engine.Store.CompleteImmutableOperation(ctx, s.claim, key, kind, value)
+	}
 	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, kind, map[string]string{"identity": store.Hash(value)}, false); err != nil {
 		return err
 	}
@@ -281,6 +327,13 @@ func (s *session) loopSave(ctx context.Context, key, kind string, value any) err
 }
 func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cause error) error {
 	l := s.cp.ArticleLoop
+	if p.Mode == "source" {
+		return loopStop("ARTICLE_SOURCE_PLAN_FAILED", "来源先行核验未取得完整响应，不能跳过来源义务或转写正文："+cause.Error())
+	}
+	if p.ReferenceRepairKey != "" {
+		l.Feedback = domain.JSON(map[string]any{"failure": "reference_repair_incomplete", "detail": cause.Error()})
+		return loopStop("ARTICLE_REVIEW_PROTOCOL_FAILED", "定点引用纠错未完成，保留原报告与票据；不拆分或重做语义核验")
+	}
 	var work *domain.WorkError
 	var problem *domain.Problem
 	code := ""
@@ -353,6 +406,12 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	}
 	name, raw, err := loopArguments(action)
 	if err != nil {
+		if (s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV10 || s.loopWorkPlannedReview()) && loopReportedOutputCap(p, action) {
+			return s.narrowMeasuredReviewOutput(ctx, p)
+		}
+		if p.Mode == "source" {
+			return s.rejectLoopSource(err)
+		}
 		if p.Mode == "review" && s.loopConvergence() && p.Scope != nil {
 			l.Failures[s.loopReviewProtocolKey(p.Scope.ID)]++
 		}
@@ -379,7 +438,13 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			raw = domain.JSON(args)
 		}
 	}
+	if p.Mode == "source" {
+		return s.applyLoopSource(ctx, p, name, raw)
+	}
 	if p.Mode == "review" {
+		if s.loopReferenceReview() {
+			return s.applyLoopReferenceResponse(ctx, p, name, raw)
+		}
 		if name != loopReviewTool {
 			if s.loopConvergence() && p.Scope != nil {
 				l.Failures[s.loopReviewProtocolKey(p.Scope.ID)]++
@@ -434,6 +499,9 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		message := "本次章节未保存，已将具体错误反馈给模型；原有章节保留。"
 		if receipt != nil {
 			message = fmt.Sprintf("本次接纳 %d 章，退回 %d 章；文章仍需通过独立核验。", len(receipt.Accepted), len(receipt.Rejected))
+			if s.deliveryFirst() {
+				message = fmt.Sprintf("本次保存 %d 章，退回 %d 章；完成写作后即可阅读和导出。", len(receipt.Accepted), len(receipt.Rejected))
+			}
 		}
 		if write["noop"] == true && receipt != nil && len(receipt.Rejected) == 0 {
 			message = "章节内容未变化，未创建新版本，待修订问题仍然保留。"
@@ -466,6 +534,9 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		}
 		return progress, nil
 	case loopChallengeTool:
+		if s.loopReferenceReview() {
+			return s.challengeLoopReference(ctx, p, raw)
+		}
 		var in loopChallengeInput
 		if !s.loopEvidenceReview() {
 			err = errors.New("review challenge unavailable")
@@ -548,6 +619,10 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			}
 		}
 		l.NextSources = ids
+		if s.deliveryNavigation() && len(ids) == 0 {
+			l.Feedback = domain.JSON(map[string]any{"selected_sources": ids, "remaining_sources": []string{}, "action": "All originals have already been delivered. No next unread page exists. Continue writing from current_article; use explicit aliases only when a specific earlier passage is needed."})
+			return false, nil
+		}
 		l.Feedback = domain.JSON(map[string]any{"selected_sources": ids, "note": "Only sources actually delivered in the next input count as read; follow remaining coverage."})
 		return false, nil
 	case "view_frames":
@@ -681,8 +756,15 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 	l.DraftVersion = saved.Version
 	l.ReviewKeys = nil
 	l.Issues = nil
+	l.ReviewClosures = 0
 	if err = s.loopSave(ctx, "article-loop:candidate:"+hash, "article_loop_candidate", d.Article); err != nil {
 		return false, err
+	}
+	if s.deliveryFirst() {
+		l.Scopes = nil
+		l.ReviewReserve = 0
+		l.Feedback = nil
+		return true, nil
 	}
 	scopes, err := s.planLoopReview(ctx, d.Article)
 	if err != nil {
@@ -808,11 +890,19 @@ func (s *session) loopProgress(ctx context.Context, phase string) error {
 		return err
 	}
 	plan := &domain.ExecutionPlan{OpenEnded: true, Items: []domain.PlanItem{{ID: "write", Title: "阅读证据并保存文章", Status: "active"}, {ID: "validate", Title: "独立核对全片主题、原文和配图", Status: "pending"}, {ID: "publish", Title: "发布正式文章", Status: "pending"}}, Note: fmt.Sprintf("已保存%d章，稿件版本%d；核验中的修改会重新检查当前候选。", len(d.Article.Sections), saved.Version)}
+	if s.deliveryFirst() {
+		plan.Items = []domain.PlanItem{{ID: "write", Title: "分章保存完整文章", Status: "active"}, {ID: "publish", Title: "交付阅读和导出", Status: "pending"}}
+		plan.Note = fmt.Sprintf("已保存%d章；文章交付后独立提供一次审核意见。", len(d.Article.Sections))
+		if phase == "publish" {
+			plan.Items[0].Status = "done"
+			plan.Items[1].Status = "active"
+		}
+	}
 	if phase == "validate" {
 		plan.Items[0].Status = "done"
 		plan.Items[1].Status = "active"
 	}
-	if phase == "publish" {
+	if phase == "publish" && !s.deliveryFirst() {
 		plan.Items[0].Status = "done"
 		plan.Items[1].Status = "done"
 		plan.Items[2].Status = "active"

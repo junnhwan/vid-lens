@@ -37,6 +37,9 @@ func streamedActivityTitle(prefix string) string {
 
 func (s *session) modelActivity() (string, string) {
 	if s.articleCall != nil {
+		if s.articleCall.Mode == "source" {
+			return "正在通读原文并识别必要步骤和条件", "validate"
+		}
 		if s.articleCall.Mode == "review" {
 			return "正在综合核对主题、原文与配图", "validate"
 		}

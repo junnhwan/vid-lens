@@ -22,11 +22,15 @@ func TestArticleLoopAdmissionDefaultsToV2AndKeepsExplicitHistoricalContracts(t *
 	}
 	req, claim := prepared(t, s, owner)
 	var original struct {
-		Contract domain.ExecutionContract `json:"execution_contract"`
+		Contract       domain.ExecutionContract `json:"execution_contract"`
+		DeliveryPolicy string                   `json:"article_delivery_policy"`
 	}
 	_ = json.Unmarshal(claim.Run.Checkpoint, &original)
 	if original.Contract.Version != domain.ArticleLoopV2 {
 		t.Fatal("new article did not select the current independent loop")
+	}
+	if original.DeliveryPolicy != domain.CurrentArticleDelivery {
+		t.Fatal("new article did not freeze delivery before advice")
 	}
 	if _, err := s.Fail(ctx, claim, domain.Failure{Code: "MODEL_RESULT_INVALID", CanRetry: true}, false, 0); err != nil {
 		t.Fatal(err)
