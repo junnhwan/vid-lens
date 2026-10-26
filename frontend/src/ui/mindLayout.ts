@@ -73,32 +73,20 @@ export function indexMind(map: MapModel): MindIndex | null {
   return { rootId: root.id, nodes, order }
 }
 
-export function visibleMind(index: MindIndex, sketch: boolean, expanded: ReadonlySet<string>): MindNode[] {
+export function visibleMind(index: MindIndex, collapsed: ReadonlySet<string>, rootId = index.rootId): MindNode[] {
   const result: MindNode[] = []
   function walk(id: string) {
     const node = index.nodes.get(id)
     if (!node) return
     result.push(node)
-    for (const childId of node.childIds) {
-      const child = index.nodes.get(childId)
-      if (!child) continue
-      const shown = sketch ? child.depth <= 1 : child.depth <= 2 || expanded.has(node.id)
-      if (shown) walk(childId)
-    }
+    if (!collapsed.has(id)) for (const child of node.childIds) walk(child)
   }
-  walk(index.rootId)
+  walk(rootId)
   return result
 }
 
-export function branchOpen(node: MindNode, sketch: boolean, expanded: ReadonlySet<string>): boolean {
-  if (!node.childIds.length) return false
-  if (sketch) return node.depth + 1 <= 1
-  return node.depth + 1 <= 2 || expanded.has(node.id)
-}
-
-export function canToggle(node: MindNode, sketch: boolean, expanded: ReadonlySet<string>): boolean {
-  if (!node.childIds.length) return false
-  return !branchOpen(node, sketch, expanded) || expanded.has(node.id)
+export function descendantCount(index: MindIndex, id: string): number {
+  return visibleMind(index, new Set(), id).length - 1
 }
 
 export function ancestorPath(index: MindIndex, nodeId: string | null): Set<string> {
@@ -121,34 +109,41 @@ export function nodeForSection(index: MindIndex, sectionId: string): string | nu
   return null
 }
 
-export function expansionForSection(index: MindIndex, sectionId: string): { sketch: false; ids: string[] } | null {
-  const id = nodeForSection(index, sectionId)
-  const node = id ? index.nodes.get(id) : null
-  if (!node || node.depth <= 2) return null
-  const ids: string[] = []
-  let parent = node.parentId
-  while (parent) {
-    const parentNode = index.nodes.get(parent)
-    if (!parentNode) break
-    if (parentNode.depth >= 2) ids.push(parentNode.id)
-    parent = parentNode.parentId
-  }
-  return { sketch: false, ids }
+export function estimateNodeBox(label: string, depth: number): { w: number; h: number } {
+  const w = depth === 0 ? 224 : depth === 1 ? 212 : 248
+  const font = depth === 0 ? 16 : depth === 1 ? 15 : 14
+  const units = Array.from(label).reduce((sum, char) => sum + (/[^\u0000-\u00ff]/.test(char) ? 1 : .56), 0)
+  const lines = Math.max(1, Math.min(3, Math.ceil(units * font / (w - 42))))
+  return { w, h: Math.max(48, Math.ceil(lines * 24 + 20)) }
 }
 
-export function estimateNodeBox(label: string, depth: number): { w: number; h: number } {
-  const font = depth === 0 ? 16 : depth === 1 ? 15 : 12.5
-  const chars = Array.from(label).length
-  const maxInner = depth === 0 ? 208 : 188
-  const textWidth = Math.min(maxInner, Math.max(font * 2, chars * font))
-  const lines = Math.max(1, Math.ceil((chars * font) / maxInner))
-  const padX = depth === 0 ? 40 : 28
-  const padY = depth === 0 ? 26 : 16
-  const kicker = depth === 0 ? 16 : 0
-  return {
-    w: Math.ceil(textWidth + padX),
-    h: Math.ceil(kicker + lines * (font + 6) + padY),
+export function overviewMind(rootId: string, topics: string[], width: number) {
+  const boxes = new Map<string, MindBox>()
+  const w = Math.max(240, width)
+  const narrow = w < 560
+  if (!topics.length) {
+    boxes.set(rootId, { x: (w - Math.min(280, w - 24)) / 2, y: 24, w: Math.min(280, w - 24), h: 96 })
+    return { boxes, width: w, height: 144, narrow }
   }
+  if (narrow) {
+    const nodeW = (w - 16) / 2
+    boxes.set(rootId, { x: 12, y: 0, w: w - 24, h: 84 })
+    topics.forEach((id, index) => boxes.set(id, { x: index % 2 ? nodeW + 16 : 0, y: 108 + Math.floor(index / 2) * 76, w: nodeW, h: 64 }))
+    return { boxes, width: w, height: 108 + Math.ceil(topics.length / 2) * 76, narrow }
+  }
+  const rows = Math.ceil(topics.length / 2)
+  const height = Math.max(256, rows * 64 + 16)
+  const rootW = Math.min(200, w * .29)
+  const nodeW = Math.min(210, w * .26)
+  const leftCount = Math.floor(topics.length / 2)
+  boxes.set(rootId, { x: (w - rootW) / 2, y: (height - 96) / 2, w: rootW, h: 96 })
+  topics.forEach((id, index) => {
+    const left = index < leftCount
+    const count = left ? leftCount : topics.length - leftCount
+    const at = left ? index : index - leftCount
+    boxes.set(id, { x: left ? 0 : w - nodeW, y: (height - (count * 56 + (count - 1) * 8)) / 2 + at * 64, w: nodeW, h: 56 })
+  })
+  return { boxes, width: w, height, narrow }
 }
 
 function round(value: number): number {
@@ -221,44 +216,27 @@ export function layoutMind(
 
 export interface MindMove {
   focus: string
-  sketch?: boolean
-  expanded?: Set<string>
+  collapsed?: Set<string>
 }
 
-export function mindMove(
-  focusedId: string,
-  key: string,
-  index: MindIndex,
-  visible: MindNode[],
-  sketch: boolean,
-  expanded: ReadonlySet<string>,
-): MindMove | null {
-  const node = index.nodes.get(focusedId)
-  if (!node || !visible.some((item) => item.id === focusedId)) return null
-  const visibleIds = new Set(visible.map((item) => item.id))
-  if (key === "ArrowUp" || key === "ArrowDown") {
-    const siblings = (node.parentId ? index.nodes.get(node.parentId)?.childIds ?? [] : [index.rootId]).filter((id) => visibleIds.has(id))
-    const at = siblings.indexOf(focusedId)
-    const next = key === "ArrowDown" ? siblings[at + 1] : siblings[at - 1]
-    return next ? { focus: next } : null
+export function mindMove(focusedId: string, key: string, visible: MindNode[], collapsed: ReadonlySet<string>): MindMove | null {
+  const at = visible.findIndex((node) => node.id === focusedId)
+  const node = visible[at]
+  if (!node) return null
+  if (key === "Home") return { focus: visible[0].id }
+  if (key === "End") return { focus: visible[visible.length - 1].id }
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    const next = visible[at + (key === "ArrowDown" ? 1 : -1)]
+    return next ? { focus: next.id } : null
   }
   if (key === "ArrowLeft") {
-    if (!sketch && node.depth >= 2 && expanded.has(node.id)) {
-      const next = new Set(expanded)
-      next.delete(node.id)
-      return { focus: focusedId, expanded: next }
-    }
-    return node.parentId && visibleIds.has(node.parentId) ? { focus: node.parentId } : null
+    if (node.childIds.length && !collapsed.has(node.id)) return { focus: node.id, collapsed: new Set([...collapsed, node.id]) }
+    return node.parentId && visible.some((item) => item.id === node.parentId) ? { focus: node.parentId } : null
   }
-  if (key === "ArrowRight") {
-    if (node.childIds.length && !branchOpen(node, sketch, expanded)) {
-      if (sketch) return { focus: node.childIds[0], sketch: false }
-      const next = new Set(expanded)
-      next.add(node.id)
-      return { focus: node.childIds[0], expanded: next }
-    }
-    const first = node.childIds.find((id) => visibleIds.has(id))
-    return first ? { focus: first } : null
+  if (key === "ArrowRight" && node.childIds.length) {
+    const next = new Set(collapsed)
+    next.delete(node.id)
+    return { focus: node.childIds[0], ...(collapsed.has(node.id) ? { collapsed: next } : {}) }
   }
   return null
 }
