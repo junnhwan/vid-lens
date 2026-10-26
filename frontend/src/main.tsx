@@ -7,6 +7,7 @@ import "./styles/reading.css"
 import "./styles/sharing.css"
 import "./styles/queue.css"
 import "./styles/announcement.css"
+import "./styles/reading-frame.css"
 
 // Apply this before React renders shared content or requests its images.
 if (location.pathname.startsWith("/s/")) {

@@ -30,7 +30,6 @@ body:has(.examples-page) .topbar-inner { width: min(1480px, calc(100% - 64px)); 
 .example-stage { scroll-margin-top: 88px; }
 .example-reading { display: block; }
 .examples-page .example-sheet { min-width: 0; padding: 0; border: 0; background: none; }
-.examples-page .example-sheet .article-head h1 { margin: 0; font-size: 2.35rem; line-height: 1.22; letter-spacing: -.025em; }
 .examples-page .article-outline { position: sticky; top: 88px; width: auto; margin: 8px 0 0; }
 .example-article-meta { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 18px; }
 .example-article-meta a,
@@ -66,7 +65,6 @@ body:has(.examples-page) .topbar-inner { width: min(1480px, calc(100% - 64px)); 
   .examples-page .article-outline > :is(.outline-heading, .outline-desktop) { display: none; }
   .examples-page .outline-compact { display: flex; }
   .example-strip-item { width: 148px; }
-  .examples-page .example-sheet .article-head h1,
   .example-empty h1 { font-size: 2rem; }
 }
 @media (prefers-reduced-motion: reduce) {

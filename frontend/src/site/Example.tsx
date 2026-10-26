@@ -7,6 +7,8 @@ import { BlockView } from "../ui/Blocks"
 import { ExecutionPlan } from "../ui/ExecutionPlan"
 import { Lightbox } from "../ui/Lightbox"
 import { ArticleOutline } from "../ui/ArticleOutline"
+import { ArticleHeader } from "../ui/ArticleHeader"
+import { ArticleNotes } from "../ui/ArticleNotes"
 import { ReadingDialog } from "../ui/ReadingDialog"
 import { ArticleGallery } from "../ui/ArticleGallery"
 import { articleImages } from "../ui/articleImages"
@@ -235,27 +237,27 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
     <ArticleOutline label="目录" sections={sections} current={section} onJump={jump} imageCounts={imageCounts} />
     <div className="article-col">
     <article className="sheet example-sheet">
-      <header className="article-head">
-        <h1 id="article-top">{data.article.title}</h1>
-        <div className="article-tools">
-          <p className="meta">{caption}</p>
-          <a className="text-button" href={data.article.source.canonical_url} target="_blank" rel="noopener noreferrer">打开原视频 <span aria-hidden="true">↗</span></a>
-          <ArticleGallery groups={gallery} onOpenFrame={onOpenFrame} onLocate={jump} onBroken={() => {}} />
-          <button type="button" className="disclosure" aria-haspopup="dialog" onClick={() => setGenOpen(true)}>查看生成过程</button>
+      <ArticleHeader title={data.article.title} meta={caption} sourceUrl={data.article.source.canonical_url} onDetails={() => setGenOpen(true)}>
+          <div className="article-browse"><ArticleGallery groups={gallery} onOpenFrame={onOpenFrame} onLocate={jump} onBroken={() => {}} /></div>
+          <div className="article-actions">
           <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={questions.open} onClick={questions.toggle}>问这条视频</button>
-        </div>
-        <ModelIdentity model={data.generation_model} purpose={data.purpose} detailLevel={data.detail_level} showHistoryNote={false} />
-      </header>
-      <ReadingDialog open={genOpen} title="生成过程" onClose={() => setGenOpen(false)} className="generation-dialog">
+          </div>
+      </ArticleHeader>
+      <ReadingDialog open={genOpen} title="生成信息与过程" onClose={() => setGenOpen(false)} className="generation-dialog">
+          <section className="reading-generation" aria-label="本次生成信息"><h3>本次生成</h3><ModelIdentity model={data.generation_model} purpose={data.purpose} detailLevel={data.detail_level} showHistoryNote={false} /></section>
           <ExecutionPlan activity={processActivity(steps)} completed />
           <ActivityList steps={steps} resourceStatus="completed" detailed open onOpenFrame={onOpenFrame} onBroken={() => {}} />
           {processNote ? <p className="history-note">{processNote}</p> : null}
       </ReadingDialog>
-      {!data.media.can_inspect_now ? <p className="history-note">{data.media.can_restore_for_question ? "现在不能直接查看新的画面。提问时可以再准备这条视频。" : "现在不能查看新的画面。已有文章仍然可以读。"}</p> : null}
+      {!data.media.can_inspect_now ? <aside className="reading-notice"><h3>视频画面暂不可用</h3><p>{data.media.can_restore_for_question ? "现在不能直接查看新的画面。提问时可以再准备这条视频。" : "现在不能查看新的画面。已有文章仍然可以读。"}</p></aside> : null}
       {data.article.mind_map ? <MindMap map={data.article.mind_map} current={section} onJump={jump} /> : null}
       <div className="prose" id="prose">{sections.map((item) => <section key={item.id}><h2 id={item.id}>{item.title}</h2>{item.blocks.map((block) =>
         <BlockView key={block.id} block={block} sectionId={item.id} frames={frames} citations={data.article.citations} onCite={onCite} onOpenFrame={onOpenFrame} onAskFrame={questions.askFrame} onBroken={() => {}} readOnly={!canAsk} />
-      )}</section>)}{data.article.limitations.length ? <aside className="limits"><h2>还没确认的部分</h2>{data.article.limitations.map((item, index) => <p key={index}>{item.message}</p>)}</aside> : null}</div>
+      )}</section>)}</div>
+      <ArticleNotes limitations={data.article.limitations} sections={sections} onJump={jump}>
+        <div className="reading-finish-heading"><h2>对文中的内容还有疑问？</h2><button type="button" className="reading-note-link" onClick={() => jump("article-top")}>回到开头 <span aria-hidden="true">↑</span></button></div>
+        <div className="reading-finish-actions"><button type="button" className="btn toggle" onClick={() => { if (!questions.open) questions.toggle(); else document.getElementById("composer")?.focus({ preventScroll: true }) }}>问这条视频</button></div>
+      </ArticleNotes>
     </article>
     </div>
     <div className="qa-slot">

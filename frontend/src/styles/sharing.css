@@ -29,7 +29,6 @@
 .share-banner { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 26px; color: var(--ink-soft); font-size: 12px; }
 .shared-status { color: var(--teal-ink); margin-left: 12px; }
 .shared-sheet { max-width: 900px; margin: 0 auto; }
-.shared-sheet .article-head h1 { font-size: clamp(30px, 3.3vw, 44px); }
 .shared-sheet a.text-button { color: var(--teal-ink); font-size: 12px; text-decoration: none; }
 .shared-process { padding-bottom: 20px; margin-bottom: 26px; border-bottom: 1px solid var(--line); }
 .shared-process summary { cursor: pointer; font-size: 13px; color: var(--ink-soft); padding: 8px 0; }

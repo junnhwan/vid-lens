@@ -6,6 +6,27 @@ import { ArticleReviewPanel } from "./ArticleReviewPanel"
 afterEach(() => vi.unstubAllGlobals())
 
 describe("optional article review", () => {
+  it("distinguishes a completed review from approval and keeps chapter findings accessible", async () => {
+    vi.stubGlobal("document", { hidden: false })
+    vi.stubGlobal("sessionStorage", memoryStore())
+    const jump = vi.fn()
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ review: {
+      id: "review", article_id: "article", trigger: "automatic", status: "completed",
+      result: { summary: "需要对照原视频核对。", findings: [{ section_id: "chapter-2", problem: "专有名词存在歧义。", suggestion: "回到这一章查看来源。" }] },
+    } }), { status: 200 })))
+    let tree!: ReturnType<typeof create>
+    await act(async () => { tree = create(<ArticleReviewPanel requestId="request" csrf="csrf" onJump={jump} />) })
+    const html = JSON.stringify(tree.toJSON())
+    expect(html).toContain("已完成")
+    expect(html).toContain("1 条核对建议")
+    expect(html).toContain("专有名词存在歧义")
+    expect(html).not.toContain("审核通过")
+    expect(tree.root.findByType("details").props.open).toBeUndefined()
+    const locate = tree.root.findAllByType("button").find((button) => button.props.className === "reading-note-link")!
+    await act(async () => locate.props.onClick())
+    expect(jump).toHaveBeenCalledWith("chapter-2")
+    await act(async () => tree.unmount())
+  })
   it("shows a failed review and starts another only after the reader clicks", async () => {
     vi.stubGlobal("document", { hidden: false })
     vi.stubGlobal("sessionStorage", memoryStore())

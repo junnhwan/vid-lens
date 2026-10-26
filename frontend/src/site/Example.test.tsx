@@ -51,7 +51,7 @@ describe("public example reading", () => {
   it("shows the frozen generation and a visitor question control without replaying or exposing an owner question", () => {
     const html = renderToStaticMarkup(<ExampleArticle data={data} frames={new Map([[frame.id, frame]])} questions={questions()} onOpenFrame={() => undefined} onCite={() => undefined} />)
     expect(html).toContain("神经网络到底是什么")
-    expect(html).toContain("查看生成过程")
+    expect(html).toContain("生成信息与过程")
     expect(html).toContain("查看手写数字")
     expect(html).toContain("问这条视频")
     expect(html).toContain("问这张图")

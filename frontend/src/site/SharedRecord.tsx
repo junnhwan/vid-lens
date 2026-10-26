@@ -10,6 +10,11 @@ import { ExecutionPlan } from "../ui/ExecutionPlan"
 import { Lightbox } from "../ui/Lightbox"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
+import { ArticleHeader } from "../ui/ArticleHeader"
+import { ArticleNotes } from "../ui/ArticleNotes"
+import { ArticleGallery } from "../ui/ArticleGallery"
+import { ReadingDialog } from "../ui/ReadingDialog"
+import { articleImages } from "../ui/articleImages"
 
 function statusLabel(status: string): string {
   return ({ waiting_source: "准备来源", generating: "处理中", completed: "已完成", failed: "未完成", canceled: "已停止" } as Record<string, string>)[status] || "状态未知"
@@ -78,6 +83,7 @@ export function SharedRecord() {
 }
 
 export function SharedContent({ data }: { data: SharedRecordResponse }) {
+  const [genOpen, setGenOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{ frames: Frame[]; index: number; origin: HTMLElement | null }>({ frames: [], index: 0, origin: null })
   const [broken, setBroken] = useState<Set<string>>(() => new Set())
   const article = data.article?.article
@@ -99,12 +105,18 @@ export function SharedContent({ data }: { data: SharedRecordResponse }) {
     const url = citationURL(citation, source?.canonical_url || "")
     if (url) window.open(url, "_blank", "noopener,noreferrer")
   }
-  function jump(id: string) { document.getElementById(id)?.scrollIntoView({ behavior: "auto", block: "start" }) }
+  function jump(id: string, blockId?: string) {
+    const target = blockId ? [...document.querySelectorAll<HTMLElement>(".shared-sheet [data-block-id]")].find((node) => node.dataset.blockId === blockId) : document.getElementById(id)
+    target?.scrollIntoView({ behavior: "auto", block: "start" })
+    if (target) { if (!target.hasAttribute("tabindex")) target.tabIndex = -1; target.focus({ preventScroll: true }) }
+  }
   const status = data.view.request.status
   const running = status === "waiting_source" || status === "generating"
   const source = article?.source || data.view.source
   const meta = [platformLabel(source?.platform), formatDuration(source?.duration_ms), source?.part?.label].filter(Boolean).join(" · ")
+  const gallery = articleImages(article?.sections ?? [], frames)
   const process = <>
+    <section className="reading-generation" aria-label="本次生成信息"><h3>本次生成</h3><ModelIdentity model={data.article?.generation_model || data.view.request.generation_model} detailLevel={data.article?.detail_level || data.view.request.detail_level} showHistoryNote={false} /></section>
     <ExecutionPlan activity={data.view.activity} completed={status === "completed"} />
     <ActivityList steps={data.steps} resourceStatus={status} detailed open onOpenFrame={openFrames} onBroken={onBroken} />
     {data.view.activity.history_status === "expired" || data.view.activity.history_status === "partial" ? <p className="history-note">部分处理过程已超过保留期限；已有图文仍可阅读。</p> : null}
@@ -114,13 +126,15 @@ export function SharedContent({ data }: { data: SharedRecordResponse }) {
   return <>
     <div className="share-banner"><span>分享的处理记录 <span className="shared-status" data-status={status}>{statusLabel(status)}</span></span><span>只读 · 图文与处理过程</span></div>
     <article className="sheet shared-sheet" aria-readonly="true">
-      <header className="article-head"><h1>{article?.title || source?.title || "视频处理记录"}</h1><div className="article-tools"><p className="meta">{meta}</p>{source?.canonical_url ? <a className="text-button" href={source.canonical_url} target="_blank" rel="noopener noreferrer">观看原视频 ↗</a> : null}</div><ModelIdentity model={data.article?.generation_model || data.view.request.generation_model} detailLevel={data.article?.detail_level || data.view.request.detail_level} showHistoryNote={false} /></header>
+      <ArticleHeader title={article?.title || source?.title || "视频处理记录"} meta={meta} sourceUrl={source?.canonical_url} onDetails={article ? () => setGenOpen(true) : undefined} detailsLabel="查看处理过程">
+        {gallery.length ? <div className="article-browse"><ArticleGallery groups={gallery} onOpenFrame={openFrames} onLocate={jump} onBroken={onBroken} /></div> : null}
+      </ArticleHeader>
       {article ? <>
-        <details className="shared-process"><summary>查看处理过程{data.steps.length ? ` · ${data.steps.length} 个步骤` : ""}</summary>{process}</details>
+        <ReadingDialog open={genOpen} title="处理信息与过程" onClose={() => setGenOpen(false)} className="generation-dialog">{process}</ReadingDialog>
         {article.mind_map ? <MindMap map={article.mind_map} current="" onJump={jump} /> : null}
         <div className="prose">{article.sections.map((section) => <section key={section.id}><h2 id={section.id} tabIndex={-1}>{section.title}</h2>{section.blocks.map((block) => <BlockView key={block.id} block={block} sectionId={section.id} citations={article.citations || {}} frames={frames} onOpenFrame={openFrames} onAskFrame={() => {}} onCite={cite} onBroken={onBroken} readOnly />)}</section>)}
-          {article.limitations?.length ? <div className="limits"><h2>还没确认的部分</h2><ul>{article.limitations.map((item, index) => <li key={index}>{item.message}</li>)}</ul></div> : null}
         </div>
+        <ArticleNotes limitations={article.limitations ?? []} sections={article.sections} onJump={jump}><button type="button" className="reading-note-link" onClick={() => jump("article-top")}>回到开头 <span aria-hidden="true">↑</span></button></ArticleNotes>
       </> : <div className="shared-pending"><p role="status">{running ? "视频仍在处理中，图文完成后会自动显示。" : "这次处理没有生成可阅读的图文。"}</p>{process}</div>}
     </article>
     <Lightbox frames={lightbox.frames} index={lightbox.index} open={lightbox.frames.length > 0} origin={lightbox.origin} canAsk={false} readOnly onClose={() => setLightbox({ frames: [], index: 0, origin: null })} onIndex={(index) => setLightbox((current) => ({ ...current, index }))} onAsk={() => {}} onBroken={onBroken} />
