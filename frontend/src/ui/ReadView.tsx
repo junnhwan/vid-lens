@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react"
+import { useEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, ArticleResponse, Citation, Frame, RequestView, TurnView } from "../contract/types"
 import { formatDuration, platformLabel, type PassageChoice } from "../contract/text"
 import { prefersReduced } from "./motion"
@@ -12,6 +12,10 @@ import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
 import { ArticleOutline } from "./ArticleOutline"
 import { ArticleReviewPanel } from "./ArticleReviewPanel"
+import { ReadingDialog } from "./ReadingDialog"
+import { ArticleGallery } from "./ArticleGallery"
+import { articleImages } from "./articleImages"
+import { useReadingLayout } from "./useReadingLayout"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -70,32 +74,10 @@ export function ReadView(props: {
   const colRef = useRef<HTMLDivElement>(null)
   const closePaperRef = useRef<HTMLButtonElement>(null)
   const wasPaper = useRef(false)
-  const lastLeft = useRef<number | null>(null)
-  const panelMotion = useRef<Animation | null>(null)
+  const focusFromPaper = useRef(false)
+  const qaSlotRef = useRef<HTMLDivElement>(null)
   const layout = !props.qaOpen ? "closed" : stage ? "stage" : "open"
-  useLayoutEffect(() => {
-    const el = colRef.current
-    if (!el || !props.active || stage) {
-      panelMotion.current?.cancel()
-      lastLeft.current = null
-      return
-    }
-    const transform = getComputedStyle(el).transform
-    const offset = transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41
-    const baseLeft = el.getBoundingClientRect().left - offset
-    const previous = lastLeft.current
-    lastLeft.current = baseLeft
-    panelMotion.current?.cancel()
-    if (previous !== null && !prefersReduced() && Math.abs(previous - baseLeft + offset) > 1) {
-      const motion = el.animate([{ transform: `translateX(${previous - baseLeft + offset}px)` }, { transform: "none" }], {
-        duration: 280,
-        easing: "cubic-bezier(0.32, 0.72, 0, 1)",
-      })
-      panelMotion.current = motion
-      motion.onfinish = () => motion.cancel()
-    }
-  }, [props.qaOpen, props.active, stage])
-  useEffect(() => () => panelMotion.current?.cancel(), [])
+  const motion = useReadingLayout(colRef, qaSlotRef, layout, props.active, props.article?.article.id)
   useEffect(() => {
     if (!props.qaOpen) {
       setStage(false)
@@ -107,17 +89,27 @@ export function ReadView(props: {
     if (col) col.inert = stage && !paperOpen
   }, [stage, paperOpen])
   useEffect(() => {
-    if (paperOpen) closePaperRef.current?.focus()
-    else if (wasPaper.current) document.getElementById("qa-open-article")?.focus()
+    if (paperOpen) {
+      motion.restorePaper()
+      closePaperRef.current?.focus({ preventScroll: true })
+    } else if (wasPaper.current) document.getElementById(focusFromPaper.current ? "composer" : "qa-open-article")?.focus({ preventScroll: true })
+    focusFromPaper.current = false
     wasPaper.current = paperOpen
   }, [paperOpen])
   useEffect(() => {
+    if (!paperOpen) return
+    motion.rememberPaper()
+    focusFromPaper.current = true
+    setPaperOpen(false)
+  }, [props.focusToken])
+  useEffect(() => {
     if (!stage || !paperOpen) return
     function onKey(event: KeyboardEvent) {
+      if (document.querySelector("dialog[open]")) return
       if (event.key === "Escape") {
         if (document.querySelector(".choice-menu")) return
         event.preventDefault()
-        setPaperOpen(false)
+        closePaper()
         return
       }
       if (event.key !== "Tab") return
@@ -140,7 +132,13 @@ export function ReadView(props: {
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   }, [stage, paperOpen])
+  function closePaper() {
+    motion.rememberPaper()
+    setPaperOpen(false)
+  }
   const article = props.article?.article
+  const gallery = articleImages(article?.sections ?? [], props.frames)
+  const imageCounts = Object.fromEntries(gallery.map((group) => [group.sectionId, group.images.length]))
   const firstFigure = article?.sections.flatMap((section) => section.blocks).find((block) => block.type === "figure")?.id
   const meta = [platformLabel(article?.source.platform), formatDuration(article?.source.duration_ms), article?.source.part?.label]
     .filter(Boolean)
@@ -192,8 +190,8 @@ export function ReadView(props: {
     return () => observer.disconnect()
   }, [article, locked])
 
-  function jump(id: string) {
-    const target = document.getElementById(id)
+  function jump(id: string, blockId?: string) {
+    const target = blockId ? [...(colRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [])].find((node) => node.dataset.blockId === blockId) : document.getElementById(id)
     if (!target) return
     setLocked(id)
     setCurrent(id)
@@ -201,7 +199,10 @@ export function ReadView(props: {
       behavior: prefersReduced() ? "auto" : "smooth",
       block: "start",
     })
-    if (target instanceof HTMLElement) target.focus({ preventScroll: true })
+    if (target instanceof HTMLElement) {
+      if (!target.hasAttribute("tabindex")) target.tabIndex = -1
+      target.focus({ preventScroll: true })
+    }
     window.setTimeout(() => setLocked((value) => (value === id ? null : value)), 900)
   }
 
@@ -217,7 +218,7 @@ export function ReadView(props: {
           </p>
         </>
       ) : null}
-      <div className="workspace" data-qa={layout} data-paper={paperOpen ? "open" : "closed"}>
+      <div className="workspace" data-qa={layout} data-paper={paperOpen ? "open" : "closed"} style={motion.style}>
         {stage && !paperOpen ? (
           <button type="button" className="paper-tab" onClick={() => setPaperOpen(true)}>
             图文
@@ -227,7 +228,7 @@ export function ReadView(props: {
           className="article-col"
           ref={colRef}
           onClick={() => {
-            if (stage && paperOpen) setPaperOpen(false)
+            if (stage && paperOpen) closePaper()
           }}
         >
           <article
@@ -238,9 +239,9 @@ export function ReadView(props: {
             aria-label={stage && paperOpen ? article?.title || "图文" : undefined}
             onClick={(event) => event.stopPropagation()}
           >
-            {stage ? (
+            {stage && paperOpen ? (
               <div className="paper-bar">
-                <button type="button" className="paper-close" ref={closePaperRef} onClick={() => setPaperOpen(false)}>
+                <button type="button" className="paper-close" ref={closePaperRef} onClick={closePaper}>
                   关闭图文
                 </button>
               </div>
@@ -257,10 +258,11 @@ export function ReadView(props: {
                 ) : (
                   <ExportControl requestId={props.view?.request.id} csrf={props.csrf} />
                 )}
-                <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => { if (!genOpen) props.onLoadHistory(); setGenOpen((value) => !value) }}>
-                  {genOpen ? "收起生成过程" : "查看生成过程"}
+                <ArticleGallery key={article?.id} groups={gallery} active={props.active} onOpenFrame={props.onOpenFrame} onLocate={jump} onBroken={props.onBroken} />
+                <button type="button" className="disclosure" aria-haspopup="dialog" onClick={() => { props.onLoadHistory(); setGenOpen(true) }}>
+                  查看生成过程
                 </button>
-                <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={props.qaOpen} onClick={props.onToggleQa}>
+                <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={props.qaOpen} onClick={(event) => { motion.prepare(event.detail === 0); props.onToggleQa() }}>
                   问这条视频
                 </button>
               </div>
@@ -270,8 +272,7 @@ export function ReadView(props: {
                 detailLevel={props.article?.detail_level || props.view?.request.detail_level}
               />
             </header>
-            <div className="disclose" data-open={genOpen ? "true" : "false"}>
-              <div className="disclose-inner">
+            <ReadingDialog open={props.active && genOpen} title="生成过程" onClose={() => setGenOpen(false)} className="generation-dialog">
                 <ExecutionPlan activity={props.view?.activity} completed={props.view?.request.status === "completed"} />
                 {props.view && props.historyState?.[props.view.request.id] ? <p className="history-note" role="status">{props.historyState[props.view.request.id]}</p> : null}
                 <ActivityList
@@ -288,11 +289,10 @@ export function ReadView(props: {
                 {props.view?.request.reuse === "published_article" ? (
                   <p className="history-note">这次直接打开了已有文章，没有新的生成过程。</p>
                 ) : null}
-              </div>
-            </div>
+            </ReadingDialog>
             {article?.mind_map ? <MindMap key={article.id} map={article.mind_map} current={current} onJump={jump} /> : null}
             <div className="article-reading">
-              {article && !stage ? <ArticleOutline key={article.id} sections={article.sections} current={current} onJump={jump} /> : null}
+              {article ? <ArticleOutline key={article.id} sections={article.sections} current={current} onJump={jump} imageCounts={imageCounts} /> : null}
               <div className="prose" id="prose" data-arrive={arrive ? "true" : undefined}>
                 {props.article && !props.article.media.can_inspect_now ? (
                   <p className="history-note">
@@ -353,7 +353,7 @@ export function ReadView(props: {
             </div>
           </article>
         </div>
-        <div className="qa-slot">
+        <div className="qa-slot" ref={qaSlotRef}>
           <QaPanel
             open={props.qaOpen}
             turns={props.turns}
@@ -371,7 +371,7 @@ export function ReadView(props: {
             onSend={props.onSend}
             onStop={props.onStop}
             onRetry={props.onRetryTurn}
-            onClose={props.onCloseQa}
+            onClose={() => { motion.prepare(); props.onCloseQa() }}
             onToggle={props.onToggleTurn}
             historyState={props.historyState}
             onSuggest={props.onSuggest}
@@ -389,10 +389,12 @@ export function ReadView(props: {
             modelUnavailable={props.article?.qa_available === false}
             staged={stage}
             onStage={() => {
+              motion.prepare(document.activeElement?.matches(":focus-visible"))
               setPaperOpen(false)
               setStage(true)
             }}
             onPair={() => {
+              motion.prepare(document.activeElement?.matches(":focus-visible"))
               setPaperOpen(false)
               setStage(false)
             }}

@@ -86,17 +86,26 @@ export function Lightbox({
     strip.scrollTo({ left: Math.max(0, left), behavior: prefersReduced() ? "auto" : "smooth" })
   }, [open, index])
 
-  function close() {
+  function close(afterClose?: () => void) {
     if (closingRef.current) return
     const dialog = dialogRef.current
     const stage = stageRef.current
     if (!dialog?.open) {
       onClose()
+      afterClose?.()
       return
     }
-    if (prefersReduced() || !stage) {
+    const finishClose = () => {
       dialog.close()
+      const origin = originRef.current
+      const target = origin?.closest<HTMLElement>("button") ?? origin
+      if (target?.getClientRects().length) target.focus({ preventScroll: true })
+      else document.querySelector<HTMLElement>(".gallery-trigger")?.focus({ preventScroll: true })
       onClose()
+      afterClose?.()
+    }
+    if (prefersReduced() || !stage) {
+      finishClose()
       return
     }
     closingRef.current = true
@@ -111,9 +120,8 @@ export function Lightbox({
       motion?.cancel()
       dialog.style.backgroundColor = ""
       stage.style.transform = ""
-      dialog.close()
       closingRef.current = false
-      onClose()
+      finishClose()
     }
     if (motion) motion.onfinish = finish
     else fade.onfinish = finish
@@ -164,14 +172,13 @@ export function Lightbox({
                   className="btn primary"
                   disabled={!canAsk}
                   onClick={() => {
-                    close()
-                    onAsk(frame)
+                    close(() => onAsk(frame))
                   }}
                 >
                   问这张图
                 </button>
               )}
-              <button type="button" className="btn stop" onClick={close}>
+              <button type="button" className="btn stop" onClick={() => close()}>
                 关闭
               </button>
             </div>

@@ -7,6 +7,9 @@ import { BlockView } from "../ui/Blocks"
 import { ExecutionPlan } from "../ui/ExecutionPlan"
 import { Lightbox } from "../ui/Lightbox"
 import { ArticleOutline } from "../ui/ArticleOutline"
+import { ReadingDialog } from "../ui/ReadingDialog"
+import { ArticleGallery } from "../ui/ArticleGallery"
+import { articleImages } from "../ui/articleImages"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
 import { QaPanel } from "../ui/QaPanel"
@@ -178,10 +181,15 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
     for (const node of nodes) observer.observe(node)
     return () => observer.disconnect()
   }, [sectionKey])
-  function jump(id: string) {
+  function jump(id: string, blockId?: string) {
     setSection(id)
     lock.current = id
-    document.getElementById(id)?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" })
+    const target = blockId ? [...document.querySelectorAll<HTMLElement>("#prose [data-block-id]")].find((node) => node.dataset.blockId === blockId) : document.getElementById(id)
+    target?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" })
+    if (target) {
+      if (!target.hasAttribute("tabindex")) target.tabIndex = -1
+      target.focus({ preventScroll: true })
+    }
     window.setTimeout(() => { if (lock.current === id) lock.current = null }, prefersReduced() ? 0 : 900)
   }
   useEffect(() => {
@@ -221,8 +229,10 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
   const steps = data.generation_steps || []
   const processNote = data.process_status === "partial" ? "更早的步骤已经不在记录里。" : !steps.length ? "这份示例发布时，生成过程已经不在记录里。" : ""
   const canAsk = data.qa_available !== false
+  const gallery = articleImages(sections, frames)
+  const imageCounts = Object.fromEntries(gallery.map((group) => [group.sectionId, group.images.length]))
   return <div className="workspace example-workspace example-paper" data-qa={questions.open ? "open" : "closed"}>
-    <ArticleOutline label="目录" sections={sections} current={section} onJump={jump} />
+    <ArticleOutline label="目录" sections={sections} current={section} onJump={jump} imageCounts={imageCounts} />
     <div className="article-col">
     <article className="sheet example-sheet">
       <header className="article-head">
@@ -230,18 +240,17 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
         <div className="article-tools">
           <p className="meta">{caption}</p>
           <a className="text-button" href={data.article.source.canonical_url} target="_blank" rel="noopener noreferrer">打开原视频 <span aria-hidden="true">↗</span></a>
-          <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => setGenOpen((value) => !value)}>{genOpen ? "收起生成过程" : "查看生成过程"}</button>
+          <ArticleGallery groups={gallery} onOpenFrame={onOpenFrame} onLocate={jump} onBroken={() => {}} />
+          <button type="button" className="disclosure" aria-haspopup="dialog" onClick={() => setGenOpen(true)}>查看生成过程</button>
           <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={questions.open} onClick={questions.toggle}>问这条视频</button>
         </div>
         <ModelIdentity model={data.generation_model} purpose={data.purpose} detailLevel={data.detail_level} showHistoryNote={false} />
       </header>
-      <div className="disclose" data-open={genOpen ? "true" : "false"}>
-        <div className="disclose-inner">
+      <ReadingDialog open={genOpen} title="生成过程" onClose={() => setGenOpen(false)} className="generation-dialog">
           <ExecutionPlan activity={processActivity(steps)} completed />
           <ActivityList steps={steps} resourceStatus="completed" detailed open onOpenFrame={onOpenFrame} onBroken={() => {}} />
           {processNote ? <p className="history-note">{processNote}</p> : null}
-        </div>
-      </div>
+      </ReadingDialog>
       {!data.media.can_inspect_now ? <p className="history-note">{data.media.can_restore_for_question ? "现在不能直接查看新的画面。提问时可以再准备这条视频。" : "现在不能查看新的画面。已有文章仍然可以读。"}</p> : null}
       {data.article.mind_map ? <MindMap map={data.article.mind_map} current={section} onJump={jump} /> : null}
       <div className="prose" id="prose">{sections.map((item) => <section key={item.id}><h2 id={item.id}>{item.title}</h2>{item.blocks.map((block) =>
