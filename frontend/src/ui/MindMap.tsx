@@ -4,6 +4,7 @@ import { ancestorPath, descendantCount, indexMind, nodeForSection, overviewMind,
 import { MindReader, type MindTarget } from "./MindReader"
 import { ReadingDialog } from "./ReadingDialog"
 import { EASE, prefersReduced } from "./motion"
+import { useMindReveal } from "./useMindReveal"
 import "../styles/mind-map.css"
 
 export function MindMap({ map, current, onJump }: { map: MapModel; current: string; onJump: (id: string) => void }) {
@@ -33,6 +34,7 @@ function MindContents({ index, current, onJump }: { index: MindIndex; current: s
   const topicIds = root.childIds.slice(activePage * capacity, (activePage + 1) * capacity)
   const overview = overviewMind(index.rootId, topicIds, width)
   const hot = ancestorPath(index, nodeForSection(index, current))
+  useMindReveal(diagram, open, topicIds.join("\n"))
 
   useEffect(() => {
     const node = diagram.current
@@ -76,11 +78,11 @@ function MindContents({ index, current, onJump }: { index: MindIndex; current: s
           const x1 = left ? rootBox.x : rootBox.x + rootBox.w, y1 = rootBox.y + rootBox.h / 2
           const x2 = left ? box.x + box.w : box.x, y2 = box.y + box.h / 2, middle = (x1 + x2) / 2
           const path = overview.narrow ? `M ${rootBox.x + rootBox.w / 2} ${rootBox.y + rootBox.h} V 96 H ${box.x + box.w / 2} V ${box.y}` : `M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}`
-          return <path key={id} d={path} data-hot={hot.has(id) || undefined} />
+          return <path key={id} d={path} pathLength={1} data-mind-enter="wire" data-mind-level={1} data-hot={hot.has(id) || undefined} />
         })}</svg>
         {[index.rootId, ...topicIds].map((id) => {
           const box = overview.boxes.get(id)!, node = index.nodes.get(id)!, isRoot = id === index.rootId
-          return <button type="button" className={`mind-theme${isRoot ? " mind-theme-root" : ""}`} key={id} aria-label={`${isRoot ? "查看完整导图" : "阅读分支"}：${node.label}`} data-hot={hot.has(id) || undefined} style={{ left: box.x, top: box.y, width: box.w, height: box.h }} onClick={() => read(id)}>
+          return <button type="button" className={`mind-theme${isRoot ? " mind-theme-root" : ""}`} key={id} aria-label={`${isRoot ? "查看完整导图" : "阅读分支"}：${node.label}`} data-mind-enter="node" data-mind-level={isRoot ? 0 : 1} data-mind-from={isRoot ? 0 : box.x < rootBox.x ? 1 : -1} data-hot={hot.has(id) || undefined} style={{ left: box.x, top: box.y, width: box.w, height: box.h }} onClick={() => read(id)}>
             <span className="mind-theme-label">{node.label}</span>{!isRoot ? <span className="mind-theme-count">{descendantCount(index, id)} 项</span> : null}
           </button>
         })}

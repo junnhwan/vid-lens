@@ -44,6 +44,7 @@
 .mind-world { position: relative; }
 .mind-tree { position: absolute; transform-origin: 0 0; }
 .mind-node-place { position: absolute; left: 0; top: 0; }
+.mind-node-reveal { position: relative; width: 100%; height: 100%; }
 .mind-node { display: flex; align-items: center; width: 100%; height: 100%; padding: 9px 13px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: 400 14px/1.65 var(--reading-font); text-align: left; user-select: none; transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out); }
 .mind-node[data-depth="1"] { font-size: 15px; }
 .mind-node[data-branch="true"] { padding-right: 32px; }

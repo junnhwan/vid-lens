@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { ancestorPath, estimateNodeBox, layoutMind, mindMove, visibleMind, type MindIndex } from "./mindLayout"
 import { MAX_MIND_ZOOM, MIN_MIND_ZOOM, minimapPoint, MIND_PADDING } from "./mindViewport"
 import { useMindViewport } from "./useMindViewport"
+import { useMindReveal } from "./useMindReveal"
 
 const useClientLayout = typeof window === "undefined" ? useEffect : useLayoutEffect
 export type MindTarget = { scope: string; node: string; revision: number }
@@ -32,6 +33,7 @@ export function MindReader({ index, current, target, active, onLocate }: {
   const hot = ancestorPath(index, hovered ?? selectedNode.id)
   const topics = index.nodes.get(index.rootId)!.childIds.map((id) => index.nodes.get(id)!)
   const rootDepth = index.nodes.get(scope)!.depth
+  useMindReveal(view.viewport, active, layoutKey)
 
   useEffect(() => {
     setScope(target.scope); setSelected(target.node); setFocused(target.node)
@@ -93,11 +95,12 @@ export function MindReader({ index, current, target, active, onLocate }: {
         <div className="mind-viewport" ref={view.viewport} data-dragging={view.dragging} onScroll={view.syncScroll} {...view.pointer} tabIndex={0} role="region" aria-label="导图画布，拖动平移，滚轮缩放">
           <div className="mind-world" style={{ width: view.world.width, height: view.world.height }}>
             <div className="mind-tree" role="tree" aria-label="概念关系" onKeyDown={onKey} onMouseLeave={() => setHovered(null)} style={{ width: layout.width, height: layout.height, left: view.world.x, top: view.world.y, transform: `scale(${view.scale})` }}>
-              <svg className="mind-wires" width={layout.width} height={layout.height} aria-hidden="true">{layout.wires.map((wire) => <path key={wire.id} d={wire.d} data-hot={hot.has(wire.id) || undefined} />)}</svg>
+              <svg className="mind-wires" width={layout.width} height={layout.height} aria-hidden="true">{layout.wires.map((wire) => <path key={wire.id} d={wire.d} pathLength={1} data-mind-enter="wire" data-mind-level={wire.depth - rootDepth} data-hot={hot.has(wire.id) || undefined} />)}</svg>
               {visible.map((node) => {
                 const box = layout.boxes.get(node.id)!
                 const open = !collapsed.has(node.id)
                 return <div key={node.id} className="mind-node-place" style={{ width: box.w, height: box.h, transform: `translate(${box.x}px, ${box.y}px)` }}>
+                  <div className="mind-node-reveal" data-mind-enter="node" data-mind-level={node.depth - rootDepth} data-mind-from={node.id === scope ? 0 : -1}>
                   <button type="button" role="treeitem" className="mind-node" data-node-id={node.id} data-parent-id={node.parentId ?? undefined} data-depth={node.depth} data-target={node.sectionId ?? undefined} data-root={node.id === scope || undefined} data-hot={hot.has(node.id) || undefined} data-branch={node.childIds.length > 0 || undefined}
                     aria-label={node.label} aria-level={node.depth - rootDepth + 1} aria-selected={selectedNode.id === node.id} aria-expanded={node.childIds.length ? open : undefined} aria-current={node.sectionId && node.sectionId === current ? "location" : undefined}
                     tabIndex={focused === node.id ? 0 : -1} ref={(element) => { if (element) refs.current.set(node.id, element); else refs.current.delete(node.id) }}
@@ -105,6 +108,7 @@ export function MindReader({ index, current, target, active, onLocate }: {
                     <span className="mind-node-label">{node.label}</span>
                   </button>
                   {node.childIds.length ? <button type="button" className="mind-joint" tabIndex={-1} aria-label={`${open ? "折叠" : "展开"}${node.label}`} onClick={() => toggle(node.id)}>{open ? "−" : "＋"}</button> : null}
+                  </div>
                 </div>
               })}
             </div>
