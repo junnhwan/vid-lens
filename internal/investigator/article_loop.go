@@ -487,7 +487,9 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			in.Finish = patch.Finish
 			result, progress, e = s.patchLoopBlocks(ctx, key, patch)
 		} else {
-			if s.deliveryVisuals() {
+			if s.deliveryConceptMaps() {
+				err = decodeDeliveryConceptMapWrite(raw, &in)
+			} else if s.deliveryVisuals() {
 				err = decodeDeliveryVisualWrite(raw, &in)
 			} else {
 				err = loopDecode(raw, &in)
@@ -888,6 +890,11 @@ func (s *session) publishLoopCandidate(ctx context.Context) error {
 func (s *session) validateLoopArticle(ctx context.Context, a domain.Article, d articleLoopDraft) error {
 	if a.SnapshotID != s.snapshot.ID || store.Hash(a.Source) != store.Hash(s.snapshot.Source) {
 		return invalid("来源快照不一致")
+	}
+	if s.deliveryConceptMaps() {
+		if err := validateDeliveryConceptMap(a.MindMap, a.Sections); err != nil {
+			return err
+		}
 	}
 	if err := s.validateArticle(ctx, a); err != nil {
 		return err

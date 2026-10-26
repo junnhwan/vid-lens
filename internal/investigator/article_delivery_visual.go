@@ -83,7 +83,7 @@ type deliveryVisualAllowance struct {
 }
 
 func (s *session) deliveryVisuals() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV6
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV6 || s.cp.ArticleLoop.ReviewRevision == domain.ArticleDeliveryV7)
 }
 
 // A syntactically valid prose save survives a malformed optional sidecar.

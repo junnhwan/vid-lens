@@ -12,6 +12,9 @@ import (
 // Advice is separate from publication. Delivery still binds the exact saved
 // candidate to its frozen sources and the actual pixels delivered to the author.
 func verifyDeliveryPublication(ctx context.Context, tx pgx.Tx, c domain.Claim, a domain.Article, version int, evidence, policy string, seen []string, revision string) error {
+	if revision == domain.ArticleDeliveryV7 && a.MindMap == nil {
+		return articleLoopGateError()
+	}
 	draft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, c.Run.ID)
 	var data struct {
 		Article domain.Article `json:"article"`

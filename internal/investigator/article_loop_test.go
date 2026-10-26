@@ -127,7 +127,7 @@ func loopFixture(t *testing.T, handler http.HandlerFunc, revisions ...string) *s
 	s.profile.MaxOutputTokens = 32768
 	s.profile.ArticleHarness = domain.ArticleLoopV2
 	// Existing fixtures exercise the frozen v5 wire. New revision tests opt in;
-	// admission itself defaults to v6 through initializeArticleLoop.
+	// admission itself freezes the current delivery policy separately.
 	s.initializeArticleLoop()
 	s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV5
 	if len(revisions) > 0 {

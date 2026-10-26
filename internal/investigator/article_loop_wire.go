@@ -101,9 +101,11 @@ type loopSaveInput struct {
 	Sections          []loopSection             `json:"sections" jsonschema:"maxItems=40,description=At most 40 chapters and 128 KiB for the complete write action; obey the smaller current_call section/output limit, split complete actions when needed"`
 	DeleteIDs         []string                  `json:"delete_ids,omitempty"`
 	Order             []string                  `json:"order,omitempty" jsonschema:"description=Atomic reorder: every retained stable section_id exactly once; separate from section writes"`
+	MindMap           *domain.MindMap           `json:"mind_map,omitempty" jsonschema:"description=Concept tree with root_id and nodes of id, parent_id, label, section_id. Include with the final save; preserve it when omitted. At most 80 nodes and 4 branch levels, with meaningful themes and relationships rather than copied chapter headings. Every chapter must have a linked concept. section_id uses existing stable IDs or exact creation keys accepted in this same save; group nodes use null."`
 	VisualRequests    []deliveryVisualRequest   `json:"visual_requests,omitempty" jsonschema:"maxItems=2,description=Optional targeted screenshots to prepare AFTER saving prose; never required for finish"`
 	FigurePlacements  []deliveryFigurePlacement `json:"figure_placements,omitempty" jsonschema:"maxItems=6,description=Insert observed figures into existing chapters without resending their prose"`
 	visualParseIssues []string
+	mindMapParseIssue string
 }
 type loopStateInput struct {
 	SectionIDs []string `json:"section_ids,omitempty" jsonschema:"description=Optional existing section IDs to read in full; empty uses the current evidence workspace"`
@@ -333,6 +335,13 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			var root map[string]any
 			if err = json.Unmarshal(domain.JSON(sc), &root); err != nil {
 				return nil, err
+			}
+			if info.Name == loopSaveTool && !s.deliveryConceptMaps() {
+				props, _ := root["properties"].(map[string]any)
+				delete(props, "mind_map")
+			}
+			if info.Name == loopSaveTool && s.deliveryConceptMaps() {
+				info.Desc += " 完成时在同一次保存中提交mind_map概念关系树；section_id可用本次接纳的新章key，程序转换为真实章节ID。省略mind_map保留已有导图；不必重发正文来补图。"
 			}
 			if !s.deliveryVisuals() {
 				props, _ := root["properties"].(map[string]any)
@@ -801,12 +810,18 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 	if len(in.Sections) > 40 || len(domain.JSON(in)) > loopWriteBytes {
 		return map[string]any{"error": "resource_limit", "limit": "1–40 sections and 128 KiB per write; split this action"}, false, nil
 	}
+	if in.MindMap != nil && !s.deliveryConceptMaps() {
+		return map[string]any{"error": "mind_map is unavailable under this frozen contract"}, false, nil
+	}
 	catalog, err := s.loopCatalog(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	receipt := &loopReceipt{Accepted: []string{}, Created: map[string]string{}, Rejected: []loopRejection{}}
 	receipt.FigureOmissions = append(receipt.FigureOmissions, in.visualParseIssues...)
+	if in.mindMapParseIssue != "" {
+		receipt.Rejected = append(receipt.Rejected, loopRejection{Path: "/mind_map", Reason: in.mindMapParseIssue})
+	}
 	seen := map[string]bool{}
 	for _, sec := range in.Sections {
 		identity := sec.SectionID
@@ -949,6 +964,11 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 	}
 	if len(d.Article.Sections) > 40 {
 		return map[string]any{"error": "resource_limit", "limit": "40 total sections"}, false, nil
+	}
+	if s.deliveryConceptMaps() {
+		if err := saveDeliveryConceptMap(&d.Article, in.MindMap, receipt, structural); err != nil {
+			return map[string]any{"error": "atomic revision rejected; no changes saved", "rejected": receipt.Rejected}, false, nil
+		}
 	}
 	if s.deliveryVisuals() {
 		if err := s.placeDeliveryFigures(ctx, &d, in.FigurePlacements, receipt, catalog); err != nil {

@@ -21,10 +21,14 @@ const ArticleDeliveryV5 = "delivery-first-2026-10-25-v5"
 // V6 integrates optional visual requests into chapter saves, with durable
 // capture/refinement limits and prose reserves. Older runs keep their wire.
 const ArticleDeliveryV6 = "delivery-first-2026-10-25-v6"
-const CurrentArticleDelivery = ArticleDeliveryV6
+
+// V7 restores concept maps in the author's final save. Already admitted runs
+// keep their original wire and may finish without a map.
+const ArticleDeliveryV7 = "delivery-first-2026-10-26-v7"
+const CurrentArticleDelivery = ArticleDeliveryV7
 
 func ArticleDeliveryPolicy(revision string) bool {
-	return revision == ArticleDeliveryV1 || revision == ArticleDeliveryV2 || revision == ArticleDeliveryV3 || revision == ArticleDeliveryV4 || revision == ArticleDeliveryV5 || revision == ArticleDeliveryV6
+	return revision == ArticleDeliveryV1 || revision == ArticleDeliveryV2 || revision == ArticleDeliveryV3 || revision == ArticleDeliveryV4 || revision == ArticleDeliveryV5 || revision == ArticleDeliveryV6 || revision == ArticleDeliveryV7
 }
 
 type ArticleAdvice struct {

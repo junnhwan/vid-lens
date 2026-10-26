@@ -57,7 +57,7 @@ func TestDeliveryPublishesCompactedSourceBindings(t *testing.T) {
 	var s *session
 	s = loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = loopPayload(t, r)
-		in := loopGoodWrite()
+		in := conceptMapWrite()
 		in.Sections[0].Content[0].Sources = s.loopAllSourceAliases()
 		writeReviewWireArgs(w, loopSaveTool, in)
 	}, domain.CurrentArticleDelivery)

@@ -890,6 +890,10 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		if s.deliveryAdvisoryQuality() {
 			system += "\n" + deliveryAdvisoryInstructions
 		}
+		if s.deliveryConceptMaps() {
+			system += "\n" + deliveryConceptMapInstructions
+			payload["mind_map_required"] = true
+		}
 		delete(payload, "blocking_issues")
 		if s.deliveryRecovering() {
 			var feedback map[string]any

@@ -146,6 +146,9 @@ func loopReviewPixelIdentities(a domain.Article) (domain.Article, error) {
 // exposing it as the editable draft invites incompatible type/blocks repairs.
 func (s *session) loopAuthorDraft(a domain.Article, notes map[string]loopFrameNote, version int) (loopSaveInput, error) {
 	out := loopSaveInput{ExpectedVersion: version, Title: &a.Title, Sections: []loopSection{}}
+	if s.deliveryConceptMaps() {
+		out.MindMap = a.MindMap
+	}
 	textAliases, frameAliases := map[string]string{}, map[string]string{}
 	for i, part := range s.transcript {
 		textAliases[part.ID] = fmt.Sprint("t", i+1)

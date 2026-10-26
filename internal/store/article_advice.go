@@ -32,7 +32,7 @@ type ArticleReview struct {
 func queueAutomaticArticleReview(ctx context.Context, tx pgx.Tx, run, article, config string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO article_reviews(id,article_id,config_id,trigger)
  SELECT $1,$2,$3,'automatic' FROM job_runs WHERE id=$4 AND checkpoint->>'article_delivery_policy'=ANY($5::text[])
- ON CONFLICT DO NOTHING`, domain.ID(), article, config, run, []string{domain.ArticleDeliveryV1, domain.ArticleDeliveryV2, domain.ArticleDeliveryV3, domain.ArticleDeliveryV4, domain.ArticleDeliveryV5, domain.ArticleDeliveryV6})
+ ON CONFLICT DO NOTHING`, domain.ID(), article, config, run, []string{domain.ArticleDeliveryV1, domain.ArticleDeliveryV2, domain.ArticleDeliveryV3, domain.ArticleDeliveryV4, domain.ArticleDeliveryV5, domain.ArticleDeliveryV6, domain.ArticleDeliveryV7})
 	return err
 }
 

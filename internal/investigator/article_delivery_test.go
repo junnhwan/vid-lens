@@ -431,7 +431,7 @@ func TestDeliveryMalformedJSONRecoveryNarrowsWorkWithoutDroppingSavedDraft(t *te
 func TestDeliveryQuoteWordingDoesNotDiscardChapter(t *testing.T) {
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = loopPayload(t, r)
-		in := loopGoodWrite()
+		in := conceptMapWrite()
 		in.Sections[0].Content[0].Quote = domain.Ptr("An approximate rendering that is not a verbatim source quote.")
 		in.Sections[0].Content[0].Text = nil
 		writeReviewWireArgs(w, loopSaveTool, in)
@@ -452,7 +452,7 @@ func TestDeliveryQuoteWordingDoesNotDiscardChapter(t *testing.T) {
 func TestDeliveryOptionalFigureDoesNotDiscardProse(t *testing.T) {
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = loopPayload(t, r)
-		in := loopGoodWrite()
+		in := conceptMapWrite()
 		in.Sections[0].Content[1].Figure.VisibleFacts = nil
 		writeReviewWireArgs(w, loopSaveTool, in)
 	}, domain.CurrentArticleDelivery)
