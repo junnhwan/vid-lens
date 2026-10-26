@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"gopkg.in/yaml.v3"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -96,6 +97,8 @@ func (p Profile) Validate() error {
 }
 
 type Config struct {
+	SubmissionLimits                                                                                         SubmissionLimits
+	TrustedProxyCIDRs                                                                                        []netip.Prefix
 	DatabaseURL, RedisURL, DataDir, Listen, Origin, AdminToken, SecretKey, DevMediaDir, CookieFile, ProxyURL string
 	SecureCookie                                                                                             bool
 	SessionTTL                                                                                               time.Duration
@@ -147,6 +150,11 @@ func LoadFile(path string) (Config, error) {
 	p.ASRModel = get("VIDLENS_ASR_MODEL")
 	c := Config{DatabaseURL: get("VIDLENS_DATABASE_URL"), RedisURL: env("VIDLENS_REDIS_URL", "redis://127.0.0.1:6379/0"), DataDir: get("VIDLENS_DATA_DIR"), Listen: env("VIDLENS_LISTEN", "127.0.0.1:8080"), Origin: env("VIDLENS_PUBLIC_ORIGIN", "http://127.0.0.1:8080"), AdminToken: get("VIDLENS_ADMIN_TOKEN"), SecretKey: get("VIDLENS_SECRET_KEY"), DevMediaDir: get("VIDLENS_DEV_MEDIA_DIR"), CookieFile: get("VIDLENS_PLATFORM_COOKIE_FILE"), ProxyURL: get("VIDLENS_PROXY_URL"), Profile: p, ModelKey: get("VIDLENS_MODEL_API_KEY"), ASRKey: get("VIDLENS_ASR_API_KEY"), SessionTTL: 30 * 24 * time.Hour}
 	c.SecureCookie = strings.HasPrefix(c.Origin, "https://")
+	var limitsErr error
+	c.SubmissionLimits, c.TrustedProxyCIDRs, limitsErr = loadSubmissionLimits(get)
+	if limitsErr != nil {
+		return c, limitsErr
+	}
 	if v := get("VIDLENS_VIDEO_CONCURRENCY"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > MaxVideoConcurrency {

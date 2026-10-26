@@ -10,7 +10,7 @@ import (
 	"vidlens/internal/domain"
 )
 
-func retainedASR(t *testing.T, s *Store, owner string, model CatalogModel) (domain.Request, domain.Claim) {
+func retainedASR(t *testing.T, s *Store, owner string, model CatalogModel, history ...domain.Step) (domain.Request, domain.Claim) {
 	t.Helper()
 	ctx := context.Background()
 	in := domain.RequestInput{VideoURL: "https://youtube.com/watch?v=abcdefghijk", ModelID: model.ID, ModelRevisionID: model.RevisionID}
@@ -26,6 +26,11 @@ func retainedASR(t *testing.T, s *Store, owner string, model CatalogModel) (doma
 	if err != nil || c == nil {
 		t.Fatal(err)
 	}
+	for _, step := range history {
+		if _, err := s.Step(ctx, *c, step); err != nil {
+			t.Fatal(err)
+		}
+	}
 	video := domain.Asset{ID: domain.ID(), SourceID: c.Run.SourceID, RunID: c.Run.ID, Kind: "video", StorageKey: domain.ID() + ".mp4", SHA256: "retained-video", MIME: "video/mp4", Bytes: 72}
 	if err := s.AddAsset(ctx, *c, video); err != nil {
 		t.Fatal(err)
@@ -40,6 +45,71 @@ func retainedASR(t *testing.T, s *Store, owner string, model CatalogModel) (doma
 		t.Fatal(err)
 	}
 	return r, *c
+}
+
+func TestReusedSourceDoesNotReplayPreviousExecution(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	model, _ := sourceReuseModels(t, s)
+	owner := session(t, s)
+	start, finish := time.Now().Add(-time.Minute), time.Now()
+	old, prepare := retainedASR(t, s, owner, model, domain.Step{ID: domain.ID(), Kind: "tool_execution", Phase: "prepare_source", Title: "第一次下载和转写", Status: "completed", StartedAt: &start, FinishedAt: &finish})
+	other := session(t, s)
+	accepted, err := s.CreateRequestWithInput(ctx, other, domain.ID(), domain.RequestInput{VideoURL: old.InputURL, ModelID: model.ID, ModelRevisionID: model.RevisionID, Purpose: "a different article"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, _, err := s.RequestView(ctx, other, accepted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := view["activity"].(map[string]any)
+	for _, step := range activity["recent_steps"].([]domain.Step) {
+		if step.Title == "第一次下载和转写" {
+			t.Fatalf("reused request replays previous execution title and timing: %+v", step)
+		}
+	}
+	page, err := s.ActivityPage(ctx, other, "request", accepted.ID, "", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range page["items"].([]domain.Step) {
+		if step.Title == "第一次下载和转写" {
+			t.Fatal("activity history replays another request's old source execution")
+		}
+		if step.Kind == "reuse" && (step.StartedAt != nil || step.FinishedAt != nil) {
+			t.Fatal("reuse notice invents execution timing")
+		}
+	}
+	original, _, err := s.RequestView(ctx, owner, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundOriginal := false
+	for _, step := range original["activity"].(map[string]any)["recent_steps"].([]domain.Step) {
+		if step.Title == "第一次下载和转写" {
+			foundOriginal = step.StartedAt != nil && step.FinishedAt != nil
+		}
+	}
+	if !foundOriginal {
+		t.Fatal("fix erased the first request's actual source history")
+	}
+	// Requests accepted by earlier versions have no explicit reuse flag.
+	legacy, _ := s.Request(ctx, other, accepted.ID)
+	for i := range legacy.Segments {
+		legacy.Segments[i].Reused = false
+	}
+	if _, err := s.Pool.Exec(ctx, "UPDATE generation_requests SET segments=$2 WHERE id=$1", legacy.ID, domain.JSON(legacy.Segments)); err != nil {
+		t.Fatal(err)
+	}
+	view, _, err = s.RequestView(ctx, other, accepted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := view["activity"].(map[string]any)["reused_run_ids"].([]string)
+	if len(runs) != 1 || runs[0] != prepare.Run.ID {
+		t.Fatal("legacy reuse still exposes old history")
+	}
 }
 
 func sourceReuseModels(t *testing.T, s *Store) (CatalogModel, CatalogModel) {

@@ -26,12 +26,13 @@ import (
 const cookieName = "vidlens_session"
 
 type Server struct {
-	Store        *store.Store
-	Config       config.Config
-	hub          *Hub
-	CheckModel   func(context.Context, config.Profile) (any, error)
-	loginWorkers chan struct{}
-	loginQueue   chan struct{}
+	SubmissionLimiter func(context.Context, string, string, string) error
+	Store             *store.Store
+	Config            config.Config
+	hub               *Hub
+	CheckModel        func(context.Context, config.Profile) (any, error)
+	loginWorkers      chan struct{}
+	loginQueue        chan struct{}
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config) *Server {
@@ -262,6 +263,9 @@ func (a *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error("request failed", "path", r.URL.Path, "class", "internal", "http_trace_id", domain.TraceID(r.Context()))
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	if seconds, ok := p.Meta["retry_after_seconds"].(int64); ok && seconds > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	}
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"schema_version": 1, "type": "about:blank", "title": http.StatusText(p.Status), "status": p.Status, "code": p.Code, "detail": p.Detail, "instance": r.URL.Path, "trace_id": domain.TraceID(r.Context()), "meta": p.Meta})
 }
@@ -288,7 +292,7 @@ func (a *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &in) {
 		return
 	}
-	x, e := a.Store.CreateRequestWithInput(r.Context(), ses.ID, key, in, "", a.Config.DevMediaDir != "")
+	x, e := a.Store.CreateRequestWithInput(a.submissionContext(r), ses.ID, key, in, "", a.Config.DevMediaDir != "")
 	if e != nil {
 		a.problem(w, r, e)
 		return
@@ -367,7 +371,7 @@ func (a *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &struct{}{}) {
 		return
 	}
-	x, e := a.Store.CreateRequest(r.Context(), ses.ID, key, "", r.PathValue("request"), a.Config.DevMediaDir != "")
+	x, e := a.Store.CreateRequest(a.submissionContext(r), ses.ID, key, "", r.PathValue("request"), a.Config.DevMediaDir != "")
 	if e != nil {
 		a.problem(w, r, e)
 		return
@@ -475,7 +479,7 @@ func (a *Server) createTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(503, "EXTERNAL_SOURCES_DISABLED", "站长尚未启用网络补充；可继续围绕视频提问。"))
 		return
 	}
-	x, e := a.Store.CreateTurn(r.Context(), ses.ID, r.PathValue("conversation"), key, in, "")
+	x, e := a.Store.CreateTurn(a.submissionContext(r), ses.ID, r.PathValue("conversation"), key, in, "")
 	if e != nil {
 		a.problem(w, r, e)
 		return
@@ -540,7 +544,7 @@ func (a *Server) retryTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(409, "CLIENT_UPDATE_REQUIRED", "本轮网络补充重试需要新版页面。"))
 		return
 	}
-	x, e := a.Store.CreateTurn(r.Context(), ses.ID, r.PathValue("conversation"), key, domain.QuestionInput{ExpectedLastTurnID: in.Last}, r.PathValue("turn"))
+	x, e := a.Store.CreateTurn(a.submissionContext(r), ses.ID, r.PathValue("conversation"), key, domain.QuestionInput{ExpectedLastTurnID: in.Last}, r.PathValue("turn"))
 	if e != nil {
 		a.problem(w, r, e)
 		return

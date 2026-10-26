@@ -101,6 +101,7 @@ type ExecutionSegment struct {
 	RunID      string `json:"run_id"`
 	SegmentNo  int    `json:"segment_no"`
 	ThroughSeq *int64 `json:"visible_through_seq"`
+	Reused     bool   `json:"reused,omitempty"`
 }
 type Request struct {
 	GenerationSpec *GenerationSpec    `json:"generation_spec"`

@@ -7,6 +7,19 @@ import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("replaces borrowed source history with an explicit reuse notice without old timing", () => {
+    const old = { ...step("old-download", "tool_execution", 0), run_id: "source", phase: "prepare_source", title: "第一次下载和转写", started_at: "2026-10-25T01:00:00Z", finished_at: "2026-10-25T01:02:00Z" }
+    const reused = { ...step("reuse:request:source", "reuse", 0), run_id: "source", phase: "prepare_source", title: "复用已有视频和文字来源", outcome: { message: "本次没有重新下载或转写。", evidence_status: "not_assessed" } }
+    const writing = { ...step("writing", "tool_execution", 1), run_id: "article" }
+    const merged = mergeActivitySnapshot([old, writing], [reused], { replace: false, sameResource: true, expired: false, reusedRunIds: ["source"] })
+    expect(merged.map(item => item.id)).toEqual([reused.id, writing.id])
+    const html = renderToStaticMarkup(<ActivityList steps={merged} open detailed={false} resourceStatus="generating" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain("复用已有视频和文字来源")
+    expect(html).toContain("本次没有重新下载或转写")
+    expect(html).not.toContain("第一次下载和转写")
+    expect(html).not.toContain("耗时")
+    expect(html).not.toContain("用时")
+  })
   it("shows AI screenshot and refinement headings as separate actions with their outcomes", () => {
     const actions = [
       { ...step("capture", "tool_execution", 1), title: "按需取帧：查看邮件分类结果", outcome: { message: "已取得2张候选画面，继续写作与选图。", evidence_status: "not_assessed" } },

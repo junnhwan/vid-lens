@@ -34,7 +34,7 @@ func (a *Server) articleReviews(w http.ResponseWriter, r *http.Request) {
 		if !a.body(w, r, &struct{}{}) {
 			return
 		}
-		accepted, err := a.Store.CreateArticleReview(r.Context(), s.ID, request, key)
+		accepted, err := a.Store.CreateArticleReview(a.submissionContext(r), s.ID, request, key)
 		if err != nil {
 			a.problem(w, r, err)
 			return

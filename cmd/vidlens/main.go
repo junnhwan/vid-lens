@@ -21,6 +21,7 @@ import (
 	"vidlens/internal/investigator"
 	"vidlens/internal/jobs"
 	"vidlens/internal/media"
+	"vidlens/internal/ratelimit"
 	"vidlens/internal/resource"
 	"vidlens/internal/store"
 )
@@ -146,6 +147,9 @@ func run(path string, migrate bool) error {
 		return e
 	}
 	api := httpapi.New(ctx, s, cfg)
+	submissions := ratelimit.New(rm.Redis.Options(), cfg.SubmissionLimits)
+	defer submissions.Redis.Close()
+	api.SubmissionLimiter = submissions.Check
 	api.CheckModel = agent.CheckModel
 	server := &http.Server{Addr: cfg.Listen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 16384}
 	errs := make(chan error, 1)

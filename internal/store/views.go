@@ -318,12 +318,27 @@ func stepsAt(ctx context.Context, q Querier, segs []domain.ExecutionSegment, req
 	all := []domain.Step{}
 	expected, retained := 0, 0
 	var expiry *time.Time
+	var requestedAt time.Time
+	if request != "" {
+		if e := q.QueryRow(ctx, "SELECT created_at FROM generation_requests WHERE id=$1", request).Scan(&requestedAt); e != nil {
+			return nil, "", nil, e
+		}
+	}
 	for _, seg := range segs {
 		var had bool
-		var status string
+		var status, kind string
 		var updated time.Time
-		if e := q.QueryRow(ctx, "SELECT had_activity,status,updated_at FROM job_runs WHERE id=$1", seg.RunID).Scan(&had, &status, &updated); e != nil {
+		if e := q.QueryRow(ctx, "SELECT had_activity,status,updated_at,kind FROM job_runs WHERE id=$1", seg.RunID).Scan(&had, &status, &updated, &kind); e != nil {
 			return nil, "", nil, e
+		}
+		// Old requests predate the explicit reuse flag. Their successful source
+		// work also finished before this request existed. Keep the original
+		// events unchanged, but never present their titles/durations as new work.
+		if seg.Reused || (!requestedAt.IsZero() && status == "succeeded" && !updated.After(requestedAt) && (kind == "source.prepare" || kind == "source.restore")) {
+			all = append(all, domain.Step{ID: "reuse:" + request + ":" + seg.RunID, RunID: seg.RunID, SegmentNo: seg.SegmentNo, Kind: "reuse", Phase: "prepare_source", Title: "复用已有视频和文字来源", Status: "completed", FrameIDs: []string{}, Frames: []domain.Frame{}, Outcome: &domain.Outcome{Message: "已使用之前保存的来源，本次没有重新下载或转写。", EvidenceStatus: "not_assessed"}})
+			expected++
+			retained++
+			continue
 		}
 		if had {
 			expected++
@@ -524,6 +539,13 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 		return nil, pos, e
 	}
 	activity := view["activity"].(map[string]any)
+	reusedRuns := []string{}
+	for _, step := range steps {
+		if step.Kind == "reuse" {
+			reusedRuns = append(reusedRuns, step.RunID)
+		}
+	}
+	activity["reused_run_ids"] = reusedRuns
 	activity["attempts"] = attempts
 	totalCalls, totalSends := 0, 0
 	for _, attempt := range attempts {

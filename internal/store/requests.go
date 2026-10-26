@@ -143,6 +143,9 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		if !supported {
 			return domain.Err(422, "UNSUPPORTED_SOURCE", "暂不支持这个视频来源。")
 		}
+		if e = checkSubmission(ctx, "generation", session); e != nil {
+			return e
+		}
 		var source string
 		e = tx.QueryRow(ctx, "INSERT INTO video_sources(id,platform,canonical_id,part_key,canonical_url) VALUES($1,$2,$3,$4,$5) ON CONFLICT(platform,canonical_id,part_key) DO UPDATE SET canonical_url=EXCLUDED.canonical_url RETURNING id", domain.ID(), identity.Platform, identity.CanonicalID, identity.PartKey, identity.URL).Scan(&source)
 		if e != nil {
@@ -215,7 +218,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		if retryID != "" {
 			retry = &retryID
 		}
-		segs := []domain.ExecutionSegment{{RunID: runID, SegmentNo: 0}}
+		segs := []domain.ExecutionSegment{{RunID: runID, SegmentNo: 0, Reused: status == "succeeded"}}
 		_, e = tx.Exec(ctx, "INSERT INTO generation_requests(id,session_id,input_url,source_id,active_run_id,config_id,status,reuse,retry_of_id,segments,deadline_at,generation_spec,snapshot_id) VALUES($1,$2,$3,$4,$5,$6,'waiting_source',$7,$8,$9,$10,$11,$12)", id, session, input, source, runID, cid, reuse, retry, domain.JSON(segs), deadline, domain.JSON(spec), retainedSnapshot)
 		if e != nil {
 			return e
@@ -420,6 +423,9 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		}
 		if count >= 5 {
 			return domain.Err(429, "ADMISSION_LIMITED", "当前问答容量已满。")
+		}
+		if e = checkSubmission(ctx, "question", session); e != nil {
+			return e
 		}
 		id := domain.ID()
 		source, e := one[domain.Snapshot](ctx, tx, "SELECT to_jsonb(s) FROM source_snapshots s WHERE id=$1", c.SnapshotID)

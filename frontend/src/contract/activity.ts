@@ -40,8 +40,10 @@ export function mergeSteps(existing: ActivityStep[], incoming: ActivityStep[], r
 
 // A new SSE binding/revision replaces its cursor, not the owned history already
 // read for this resource. Keep that history through preparation/writing stages.
-export function mergeActivitySnapshot(existing: ActivityStep[], incoming: ActivityStep[], options: { replace: boolean; sameResource: boolean; expired: boolean }): ActivityStep[] {
-  return mergeSteps(existing, incoming, options.replace && (!options.sameResource || options.expired))
+export function mergeActivitySnapshot(existing: ActivityStep[], incoming: ActivityStep[], options: { replace: boolean; sameResource: boolean; expired: boolean; reusedRunIds?: string[] }): ActivityStep[] {
+  const reused = new Set(options.reusedRunIds ?? incoming.filter(step => step.kind === "reuse").map(step => step.run_id))
+  const retained = existing.filter(step => !reused.has(step.run_id) || step.kind === "reuse")
+  return mergeSteps(retained, incoming, options.replace && (!options.sameResource || options.expired))
 }
 
 export function asSteps(value: unknown): ActivityStep[] {

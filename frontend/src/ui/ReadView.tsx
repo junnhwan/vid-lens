@@ -285,7 +285,7 @@ export function ReadView(props: {
                 {props.view?.activity.history_status === "expired" ? (
                   <p className="history-note">更早的过程已经过期，文章仍然可以读。</p>
                 ) : null}
-                {props.view?.activity.history_status === "none" && props.view.request.reuse === "published_article" ? (
+                {props.view?.request.reuse === "published_article" ? (
                   <p className="history-note">这次直接打开了已有文章，没有新的生成过程。</p>
                 ) : null}
               </div>

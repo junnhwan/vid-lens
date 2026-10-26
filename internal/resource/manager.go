@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,10 +272,4 @@ func (m *Manager) Cache(ctx context.Context, key string, value any) {
 	if len(b) <= 64<<10 {
 		_ = m.Redis.Set(ctx, cacheSlot(key), b, 10*time.Minute).Err()
 	}
-}
-func (m *Manager) Limit(ctx context.Context, scope string, limit int) bool {
-	h := sha256.Sum256([]byte(scope))
-	k := "vidlens:rate:" + hex.EncodeToString(h[:16])
-	v, e := m.Redis.Eval(ctx, `local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],60) end; return n`, []string{k}).Int64()
-	return e != nil || v <= int64(limit)
 }

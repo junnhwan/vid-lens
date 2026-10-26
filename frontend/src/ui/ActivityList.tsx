@@ -175,7 +175,7 @@ export function ActivityList({
               </ol>
             </details>
           ) : null}
-          {(detailed || model || step.kind === "retry" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
+          {(detailed || model || step.kind === "retry" || step.kind === "reuse" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
           {observations.length > 1 ? (
             <details className="observation-details">
               <summary>

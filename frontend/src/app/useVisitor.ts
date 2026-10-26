@@ -169,7 +169,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     requestRef.current = view
     setRequest(view)
     setSteps((prev) => {
-      const merged = mergeActivitySnapshot(prev, normalized, { replace, sameResource, expired: view.activity.history_status === "expired" })
+      const merged = mergeActivitySnapshot(prev, normalized, { replace, sameResource, expired: view.activity.history_status === "expired", reusedRunIds: view.activity.reused_run_ids })
       stepsRef.current = merged
       return merged
     })

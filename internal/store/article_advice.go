@@ -164,6 +164,9 @@ func (s *Store) CreateArticleReview(ctx context.Context, session, request, key s
 			if pending >= 20 {
 				return domain.Err(429, "ADMISSION_LIMITED", "审核队列暂时已满，文章仍可阅读和导出。")
 			}
+			if err = checkSubmission(ctx, "question", session); err != nil {
+				return err
+			}
 			id = domain.ID()
 			_, err = tx.Exec(ctx, `INSERT INTO article_reviews(id,article_id,config_id,trigger,session_id) SELECT $1,id,config_id,'manual',$3 FROM articles WHERE id=$2`, id, *r.ArticleID, session)
 		}
