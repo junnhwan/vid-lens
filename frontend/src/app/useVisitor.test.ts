@@ -103,11 +103,25 @@ describe("visitor request ownership", () => {
   })
 
   it("still replays a pending creation after boot", async () => {
-    rememberWrite(sessionStorage, {slot:"request:create",key:"pending-key",path:"/api/v1/requests",body:JSON.stringify({video_url:"https://youtube.com/watch?v=abcdefghijk"}),startedAt:Date.now(),expiresAt:Date.now()+60000})
+    rememberWrite(sessionStorage, {slot:"request:create",key:"pending-key",path:"/api/v1/requests",body:JSON.stringify({video_url:"https://youtube.com/watch?v=abcdefghijk",regenerate:true}),startedAt:Date.now(),expiresAt:Date.now()+60000})
     api.createRequest.mockResolvedValueOnce({body:{request:{id:"replayed"}}})
     await open()
+    expect(api.createRequest).toHaveBeenCalledWith("https://youtube.com/watch?v=abcdefghijk", "pending-key", { regenerate: true })
     expect(navigate).toHaveBeenCalledWith("/r/replayed")
     expect(view.submitting).toBe(false)
+  })
+
+  it("submits the chosen generation mode and returns to reuse after acceptance", async () => {
+    api.models.mockResolvedValue({ default_model_id: "model", models: [{ id: "model", revision_id: "rev", display_name: "Model", brand_id: "generic" }] })
+    api.session.mockResolvedValue({ schema_version: 1, csrf_token: "test", capabilities: { accepting_requests: true } })
+    api.createRequest.mockResolvedValueOnce({body:{request:{id:"fresh"}}})
+    await open()
+    expect(view.regenerate).toBe(false)
+    await act(async () => { view.setLink("https://youtube.com/watch?v=abcdefghijk"); view.setRegenerate(true) })
+    await act(async () => view.submit())
+    expect(api.createRequest).toHaveBeenCalledWith("https://youtube.com/watch?v=abcdefghijk", expect.any(String), { detail_level: "standard", model_id: "model", model_revision_id: "rev", regenerate: true })
+    expect(navigate).toHaveBeenCalledWith("/r/fresh")
+    expect(view.regenerate).toBe(false)
   })
 
   it("drops a conversation response after navigating to another request", async () => {

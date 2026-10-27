@@ -70,9 +70,12 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 				return &domain.Problem{Status: 422, Code: "INVALID_ARGUMENT", Detail: "解读详细程度无效。", Meta: map[string]any{"field_errors": []map[string]string{{"field": "detail_level", "message": "请选择精简、标准或详细。"}}}}
 			}
 			canonical := Hash(map[string]any{"version": 3, "video_url": input, "purpose": in.Purpose, "model_id": in.ModelID, "model_revision_id": in.ModelRevisionID, "detail_level": level})
+			if in.Regenerate {
+				canonical = Hash(map[string]any{"version": 4, "video_url": input, "purpose": in.Purpose, "model_id": in.ModelID, "model_revision_id": in.ModelRevisionID, "detail_level": level, "regenerate": true})
+			}
 			// Honor accepted pre-detail keys only for the historical default.
 			// Their immutable spec and published result must remain historical.
-			if level == "standard" {
+			if level == "standard" && !in.Regenerate {
 				var found bool
 				var err error
 				if a, found, err = replay(ctx, tx, scope, key, h); found && err == nil {
@@ -123,6 +126,11 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			spec, e = resolveSpec(ctx, tx, session, in)
 			if e != nil {
 				return e
+			}
+			if in.Regenerate {
+				// Separate this article from every previous or concurrent article.
+				// Retries retain the frozen ID and may resume their own saved draft.
+				spec.FreshArticleID = domain.ID()
 			}
 		}
 		cid := spec.ConfigID

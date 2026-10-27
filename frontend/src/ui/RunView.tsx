@@ -238,6 +238,7 @@ export function RunView({
           <p className="source-title">{source?.title || (stopped ? "视频处理未完成" : "正在确认视频")}</p>
           <p className="source-meta">{meta || view?.request.input_url || ""}</p>
           {note ? <p className="source-note">{note}</p> : null}
+          {view?.request.regenerate ? <p className="source-note">本次选择重新生成文章；视频和转写可能复用。</p> : null}
         </div>
         <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} detailLevel={view?.request.detail_level} />
       </header>

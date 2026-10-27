@@ -71,6 +71,10 @@ func TestPreparingSourceReservesDistinctArticleAdmissions(t *testing.T) {
 	if !errors.As(err, &problem) || problem.Code != "ADMISSION_LIMITED" {
 		t.Fatalf("source subscribers bypassed future article admission: %v", err)
 	}
+	_, err = s.CreateRequestWithInput(ctx, owner, domain.ID(), domain.RequestInput{VideoURL: "https://youtube.com/watch?v=abcdefghijk", Purpose: "future article 0", Regenerate: true}, "", false)
+	if !errors.As(err, &problem) || problem.Code != "ADMISSION_LIMITED" {
+		t.Fatalf("regeneration bypassed future article admission: %v", err)
+	}
 	if _, err = s.CreateRequestWithInput(ctx, owner, domain.ID(), domain.RequestInput{VideoURL: "https://youtube.com/watch?v=abcdefghijk", Purpose: "future article 0"}, "", false); err != nil {
 		t.Fatal("same future article must remain joinable", err)
 	}

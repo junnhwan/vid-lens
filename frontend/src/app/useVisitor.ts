@@ -62,6 +62,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [link, setLink] = useState("")
   const [purpose, setPurpose] = useState("")
   const [detailLevel, setDetailLevel] = useState<DetailLevel>("standard")
+  const [regenerate, setRegenerate] = useState(false)
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null)
   const [selectedModel, setSelectedModel] = useState("")
   const [catalogError, setCatalogError] = useState("")
@@ -280,6 +281,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       detail_level: detailLevel,
       ...(purpose.trim() ? { purpose: purpose.replace(/\r\n?/g, "\n").trim() } : {}),
       ...(chosen && !mockMode ? { model_id: chosen.id, model_revision_id: chosen.revision_id } : {}),
+      ...(regenerate ? { regenerate: true } : {}),
     }
     const trimmed = videoUrl.trim()
     if (!trimmed) {
@@ -318,6 +320,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       const accepted = await rt.api.createRequest(trimmed, key, options)
       if (pendingWrite(store(), slot)?.key === key) forgetWrite(store(), slot)
       if (!ownsWorkspace(gen, ownerId)) return
+      setRegenerate(false)
       navigateRef.current(`/r/${encodeURIComponent(accepted.body.request.id)}`)
     } catch (error) {
       if (!ownsWorkspace(gen, ownerId)) return
@@ -476,6 +479,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setPurpose,
     detailLevel,
     setDetailLevel,
+    regenerate,
+    setRegenerate,
     catalog,
     selectedModel,
     setSelectedModel,

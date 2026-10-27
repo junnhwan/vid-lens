@@ -11,6 +11,7 @@ import (
 
 	"vidlens/internal/domain"
 	"vidlens/internal/exporting"
+	"vidlens/internal/store"
 )
 
 func deliveryTestMap(targets ...string) *domain.MindMap {
@@ -101,6 +102,41 @@ func TestDeliveryConceptMapUsesFinalWriteWithoutExtraCall(t *testing.T) {
 	reviews, err := s.engine.Store.PendingArticleReviews(ctx)
 	if err != nil || len(reviews) != 1 {
 		t.Fatal("map policy lost independent automatic review", err)
+	}
+}
+
+func TestDeliveryRegenerationPublishesWithReusableIdentity(t *testing.T) {
+	var calls atomic.Int32
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = loopPayload(t, r)
+		calls.Add(1)
+		writeReviewWireArgs(w, loopSaveTool, conceptMapWrite())
+	}, domain.CurrentArticleDelivery)
+	ctx := context.Background()
+	// The store admission tests exercise creation; here install its frozen
+	// identity on the current-delivery fixture to exercise the model and gate.
+	s.spec.FreshArticleID = domain.ID()
+	work := "article-v3:" + s.snapshot.ID + ":" + store.Hash(&s.spec)
+	if _, err := s.engine.Store.Pool.Exec(ctx, "UPDATE generation_requests SET generation_spec=$2 WHERE active_run_id=$1", s.claim.Run.ID, domain.JSON(s.spec)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.engine.Store.Pool.Exec(ctx, "UPDATE job_runs SET work_key=$2 WHERE id=$1", s.claim.Run.ID, work); err != nil {
+		t.Fatal(err)
+	}
+	s.claim.Run.WorkKey = work
+	if err := s.engine.Run(ctx, s.claim, s.profile); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.engine.Store.Run(ctx, s.claim.Run.ID)
+	if err != nil || run.ResultID == nil || calls.Load() != 1 {
+		t.Fatalf("fresh delivery did not publish: calls=%d run=%+v err=%v", calls.Load(), run, err)
+	}
+	canonical := s.spec
+	canonical.FreshArticleID = ""
+	want := "article-v3:" + s.snapshot.ID + ":" + store.Hash(&canonical)
+	var key string
+	if err = s.engine.Store.Pool.QueryRow(ctx, "SELECT reuse_key FROM articles WHERE id=$1", *run.ResultID).Scan(&key); err != nil || key != want {
+		t.Fatalf("fresh result cannot be reused under the ordinary specification: %v", err)
 	}
 }
 

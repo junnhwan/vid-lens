@@ -4,10 +4,10 @@ import { canReplay, forgetWrite, memoryStore, pendingWrite, rememberWrite, resto
 describe("idempotent writes", () => {
   it("restores the accepted detail and model when the form changes before retry", () => {
     const store = memoryStore()
-    const frozen = { video_url: "https://youtube.com/watch?v=abcdefghijk", detail_level: "detailed" as const, purpose: "保留条件", model_id: "original", model_revision_id: "r1" }
+    const frozen = { video_url: "https://youtube.com/watch?v=abcdefghijk", detail_level: "detailed" as const, purpose: "保留条件", model_id: "original", model_revision_id: "r1", regenerate: true }
     rememberWrite(store, { slot: "request:create", key: "original", path: "/api/v1/requests", body: JSON.stringify(frozen), expiresAt: 200, startedAt: 1 })
     const saved = JSON.parse(pendingWrite(store, "request:create")!.body)
-    expect(restoreGenerationInput(saved)).toEqual({ detail_level: "detailed", purpose: "保留条件", model_id: "original", model_revision_id: "r1" })
+    expect(restoreGenerationInput(saved)).toEqual({ detail_level: "detailed", purpose: "保留条件", model_id: "original", model_revision_id: "r1", regenerate: true })
   })
 
   it("preserves omission on historical pending writes", () => {

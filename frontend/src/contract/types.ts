@@ -205,6 +205,7 @@ export interface RequestBody {
   detail_policy_revision?: string
   purpose?: string
   generation_model?: GenerationModel
+  regenerate?: boolean
   id: string
   revision: number
   input_url: string
@@ -237,6 +238,7 @@ export interface GenerationInput {
   purpose?: string
   model_id?: string
   model_revision_id?: string
+  regenerate?: boolean
 }
 
 export interface RequestView {

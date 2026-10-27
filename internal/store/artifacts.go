@@ -161,21 +161,38 @@ func finishRun(ctx context.Context, tx pgx.Tx, c domain.Claim, result string) er
 	}
 	return event(ctx, tx, c.Run.ID, nil)
 }
+func articleWorkKey(snapshot, configID string, spec *domain.GenerationSpec) string {
+	if spec == nil {
+		return snapshot + ":" + configID
+	}
+	prefix := "article-v2:"
+	if spec.Version >= 2 {
+		prefix = "article-v3:"
+	}
+	return prefix + snapshot + ":" + Hash(spec)
+}
+
+func articleReuseKey(snapshot, configID string, spec *domain.GenerationSpec) string {
+	if spec == nil || spec.FreshArticleID == "" {
+		return articleWorkKey(snapshot, configID, spec)
+	}
+	canonical := *spec
+	canonical.FreshArticleID = ""
+	return articleWorkKey(snapshot, configID, &canonical)
+}
+
 func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) error {
 	rs, e := many[domain.Request](ctx, tx, "SELECT to_jsonb(r) FROM generation_requests r WHERE active_run_id=$1 AND status='waiting_source'", prepare)
 	if e != nil {
 		return e
 	}
 	for _, r := range rs {
-		work := snapshot + ":" + r.ConfigID
-		if r.GenerationSpec != nil {
-			work = "article-v2:" + snapshot + ":" + Hash(r.GenerationSpec)
-			if r.GenerationSpec.Version >= 2 {
-				work = "article-v3:" + snapshot + ":" + Hash(r.GenerationSpec)
-			}
-		}
+		work := articleWorkKey(snapshot, r.ConfigID, r.GenerationSpec)
 		var aid string
-		e = tx.QueryRow(ctx, "SELECT id FROM articles a WHERE reuse_key=$1 AND NOT EXISTS(SELECT 1 FROM asset_refs ar JOIN media_assets m ON m.id=ar.asset_id WHERE ar.owner_type='article' AND ar.owner_id=a.id AND m.state<>'ready') ORDER BY published_at DESC LIMIT 1", work).Scan(&aid)
+		e = pgx.ErrNoRows
+		if r.GenerationSpec == nil || r.GenerationSpec.FreshArticleID == "" {
+			e = tx.QueryRow(ctx, "SELECT id FROM articles a WHERE reuse_key=$1 AND NOT EXISTS(SELECT 1 FROM asset_refs ar JOIN media_assets m ON m.id=ar.asset_id WHERE ar.owner_type='article' AND ar.owner_id=a.id AND m.state<>'ready') ORDER BY published_at DESC LIMIT 1", work).Scan(&aid)
+		}
 		var active *string
 		reuse := "none"
 		status := "generating"
@@ -292,7 +309,13 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if _, e := tx.Exec(ctx, "INSERT INTO articles(id,generation_run_id,snapshot_id,config_id,reuse_key,content,generation_model) VALUES($1,$2,$3,$4,$5,$6,$7)", a.ID, c.Run.ID, a.SnapshotID, c.Run.ConfigID, c.Run.WorkKey, domain.JSON(a), domain.JSON(model)); e != nil {
+		reuseKey := c.Run.WorkKey
+		if err == nil && frozen.FreshArticleID != "" {
+			// Fresh executions are independent, but their published result is
+			// reusable by later requests with the same ordinary specification.
+			reuseKey = articleReuseKey(a.SnapshotID, c.Run.ConfigID, &frozen)
+		}
+		if _, e := tx.Exec(ctx, "INSERT INTO articles(id,generation_run_id,snapshot_id,config_id,reuse_key,content,generation_model) VALUES($1,$2,$3,$4,$5,$6,$7)", a.ID, c.Run.ID, a.SnapshotID, c.Run.ConfigID, reuseKey, domain.JSON(a), domain.JSON(model)); e != nil {
 			return e
 		}
 		for _, id := range ids {

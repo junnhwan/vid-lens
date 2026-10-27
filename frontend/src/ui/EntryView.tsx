@@ -28,6 +28,8 @@ export function EntryView({
   onPurpose,
   detailLevel,
   onDetailLevel,
+  regenerate,
+  onRegenerate,
   catalog,
   selected,
   onSelect,
@@ -51,6 +53,8 @@ export function EntryView({
   onPurpose: (v: string) => void
   detailLevel: DetailLevel
   onDetailLevel: (v: DetailLevel) => void
+  regenerate: boolean
+  onRegenerate: (v: boolean) => void
   catalog: ModelCatalog | null
   selected: string
   onSelect: (v: string) => void
@@ -183,6 +187,17 @@ export function EntryView({
                 ]}
                 onChange={(value) => onDetailLevel(value as DetailLevel)}
               />
+              <ChoiceMenu
+                label="文章生成方式"
+                placeholder="优先复用文章"
+                value={regenerate ? "fresh" : "reuse"}
+                disabled={busy}
+                options={[
+                  { id: "reuse", label: "优先复用文章", hint: "有匹配的成稿时直接打开，也可等待共享解读" },
+                  { id: "fresh", label: "重新生成文章", hint: "独立生成新文章，视频和转写仍可复用" },
+                ]}
+                onChange={(value) => onRegenerate(value === "fresh")}
+              />
               <button
                 type="button"
                 className="purpose-toggle"
@@ -211,6 +226,7 @@ export function EntryView({
                 </span>
               </span>
             </div>
+            {regenerate ? <p className="entry-expect">本次会重新调用模型生成文章，已有的视频和转写仍可复用。</p> : null}
             <div className="fold" data-open={expanded ? "true" : "false"}>
               <div className="fold-clip">
                 <div className="purpose-field" id="purpose-field">

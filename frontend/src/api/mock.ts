@@ -6,6 +6,7 @@ import type {
   Conversation,
   Failure,
   Frame,
+  GenerationInput,
   QuestionContext,
   RequestView,
   SourceSummary,
@@ -250,6 +251,7 @@ interface Job {
   inputUrl: string
   status: string
   reuse: string
+  regenerate: boolean
   retryOf: string | null
   articleId: string | null
   source: SourceSummary | null
@@ -433,7 +435,7 @@ class MockWorld {
           idempotency_window_seconds: 86400,
         },
       }),
-      createRequest: async (videoUrl, key) => this.createRequest(videoUrl, key),
+      createRequest: async (videoUrl, key, options) => this.createRequest(videoUrl, key, options),
       getRequest: async (id) => this.requestView(this.mustJob(id)),
       cancelRequest: async (id) => this.cancelJob(this.mustJob(id)),
       retryRequest: async (id, key) => this.retryJob(this.mustJob(id), key),
@@ -487,8 +489,15 @@ class MockWorld {
     }
   }
 
-  private createRequest(videoUrl: string, key: string) {
-    const body = JSON.stringify({ video_url: videoUrl.trim() })
+  private createRequest(videoUrl: string, key: string, options?: GenerationInput) {
+    const body = JSON.stringify({
+      video_url: videoUrl.trim(),
+      purpose: options?.purpose?.replace(/\r\n?/g, "\n").trim() ?? "",
+      model_id: options?.model_id ?? "",
+      model_revision_id: options?.model_revision_id ?? "",
+      detail_level: options?.detail_level ?? "standard",
+      regenerate: options?.regenerate ?? false,
+    })
     const seen = this.requestKeys.get(key)
     if (seen) {
       if (seen.body !== body)
@@ -515,6 +524,7 @@ class MockWorld {
       inputUrl: videoUrl.trim(),
       status: "waiting_source",
       reuse: "pending",
+      regenerate: options?.regenerate ?? false,
       retryOf: null,
       articleId: null,
       source: null,
@@ -709,7 +719,7 @@ class MockWorld {
         detail: "这次生成不能从这里重试。",
       })
     }
-    const created = this.createRequest(job.inputUrl, key)
+    const created = this.createRequest(job.inputUrl, key, { regenerate: job.regenerate })
     const next = this.mustJob(created.body.request.id)
     next.retryOf = job.id
     return { ...created, body: this.requestView(next) }
@@ -1057,6 +1067,7 @@ class MockWorld {
         generation_model: developmentModel,
         status: job.status,
         reuse: job.reuse,
+        regenerate: job.regenerate,
         retry_of_id: job.retryOf,
         article_id: job.articleId,
         created_at: job.createdAt,

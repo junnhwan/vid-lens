@@ -224,6 +224,8 @@ export function App() {
               onPurpose={visitor.setPurpose}
               detailLevel={visitor.detailLevel}
               onDetailLevel={visitor.setDetailLevel}
+              regenerate={visitor.regenerate}
+              onRegenerate={visitor.setRegenerate}
               catalog={visitor.catalog}
               selected={visitor.selectedModel}
               onSelect={visitor.setSelectedModel}

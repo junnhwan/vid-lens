@@ -560,6 +560,9 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 		v["generation_model"] = r.GenerationSpec.Model
 		v["detail_level"] = r.GenerationSpec.DetailLevel
 		v["detail_policy_revision"] = r.GenerationSpec.DetailPolicyRevision
+		if r.GenerationSpec.FreshArticleID != "" {
+			v["regenerate"] = true
+		}
 	}
 	return view, pos, nil
 }

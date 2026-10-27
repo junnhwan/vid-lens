@@ -36,6 +36,7 @@ type GenerationSpec struct {
 	DetailPolicyRevision   string          `json:"detail_policy_revision,omitempty"`
 	DetailPolicy           *DetailPolicy   `json:"detail_policy,omitempty"`
 	SourcePipelineRevision string          `json:"source_pipeline_revision,omitempty"`
+	FreshArticleID         string          `json:"fresh_article_id,omitempty"`
 }
 type RequestInput struct {
 	VideoURL        string  `json:"video_url"`
@@ -43,6 +44,7 @@ type RequestInput struct {
 	ModelID         string  `json:"model_id"`
 	ModelRevisionID string  `json:"model_revision_id"`
 	DetailLevel     *string `json:"detail_level,omitempty"`
+	Regenerate      bool    `json:"regenerate,omitempty"`
 }
 
 // DetailPolicy is part of the immutable specification stored in PostgreSQL.

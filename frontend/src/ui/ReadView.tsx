@@ -300,6 +300,9 @@ export function ReadView(props: {
                 {props.view?.request.reuse === "published_article" ? (
                   <p className="history-note">这次直接打开了已有文章，没有新的生成过程。</p>
                 ) : null}
+                {props.view?.request.regenerate ? (
+                  <p className="history-note">这篇文章为本次重新生成，视频和转写可能复用。</p>
+                ) : null}
             </ReadingDialog>
             {article?.mind_map ? <MindMap key={article.id} map={article.mind_map} current={current} onJump={jump} /> : null}
             <div className="article-reading">
