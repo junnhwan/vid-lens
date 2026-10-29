@@ -43,6 +43,14 @@ describe("model token usage", () => {
     expect(html).toContain("模型响应为空。")
   })
 
+  it("hides only generic successful receipts and keeps parameter validation problems", () => {
+    const generic = { ...step("call", "model_response", 1), outcome: { message: "已收到动作请求，接下来执行并校验；内容尚未确认。", evidence_status: "not_assessed" } }
+    const invalid = { ...step("invalid", "model_response", 2), outcome: { message: "工具参数JSON不完整或无效。", evidence_status: "not_assessed" } }
+    const html = renderToStaticMarkup(<ActivityList steps={[generic, invalid]} open detailed resourceStatus="completed" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).not.toContain(generic.outcome.message)
+    expect(html).toContain(invalid.outcome.message)
+  })
+
   it("shows the call total and each physical send separately", () => {
     const steps = [
       step("call", "model_response", 1, undefined, { input: 21649, output: 3102 }),

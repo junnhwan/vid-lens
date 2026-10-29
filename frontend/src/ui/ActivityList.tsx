@@ -10,6 +10,16 @@ import { activityGroups, collapseSourceRetries } from "../contract/activity-hist
 
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
 
+// Keep specific actions and validation warnings, including historical wording.
+// Only these generic successful receipts add nothing to the call row.
+const genericModelReceipts = new Set([
+  "已收到动作请求，接下来执行并校验；内容尚未确认。",
+  "接下来执行所需的来源获取或记录；内容尚待校验。",
+  "已收到模型响应，接下来校验工具参数与内容。",
+  "响应已接收，仍需通过正式提交与内容校验。",
+  "接下来执行所需动作并校验结果。",
+])
+
 function statusText(status: string) {
   if (status === "done") return "已完成"
   if (status === "active") return "进行中"
@@ -175,7 +185,7 @@ export function ActivityList({
               </ol>
             </details>
           ) : null}
-          {(!model || view.status !== "done") && (detailed || model || step.kind === "retry" || step.kind === "reuse" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
+          {!(model && view.status === "done" && genericModelReceipts.has(view.outcome ?? "")) && (detailed || model || step.kind === "retry" || step.kind === "reuse" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
           {observations.length > 1 ? (
             <details className="observation-details">
               <summary>
