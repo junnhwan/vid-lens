@@ -44,7 +44,7 @@ func TestAnswerReadingCheckedToolUsesTheDeclaredWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{turn: &domain.Turn{}, cp: checkpoint{HarnessRevision: 16, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV2}}}
+	s := &session{turn: &domain.Turn{}, cp: checkpoint{HarnessRevision: 16, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: domain.QuestionInputRevision(domain.ArticleLoopV2)}}}
 	checked := &argumentCheckedTool{EnhancedInvokableTool: base, name: "submit_answer", session: s}
 	if _, err = checked.InvokableRun(context.Background(), &schema.ToolArgument{Text: string(domain.JSON(in))}); err != nil || !called {
 		t.Fatal("outer argument validator rejected the semantic wire declared to the provider", err)
@@ -56,7 +56,7 @@ func TestAnswerReadingCheckedToolUsesTheDeclaredWire(t *testing.T) {
 }
 
 func TestAnswerReadingWireIsFrozenSeparatelyFromCanonicalQA(t *testing.T) {
-	for _, revision := range []string{"", domain.QuestionReadingV1, domain.QuestionReadingV2} {
+	for _, revision := range []string{"", domain.QuestionReadingV1, domain.QuestionReadingV2, domain.QuestionReadingV3} {
 		s := &session{turn: &domain.Turn{}, cp: checkpoint{HarnessRevision: 16, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: revision}}}
 		if _, err := s.makeTools(); err != nil {
 			t.Fatal(err)
@@ -75,13 +75,13 @@ func TestAnswerReadingWireIsFrozenSeparatelyFromCanonicalQA(t *testing.T) {
 		}
 		blocks := wire["properties"].(map[string]any)["blocks"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
 		_, hasContent := blocks["content"]
-		if hasContent == (revision == domain.QuestionReadingV2) {
+		if hasContent == domain.QuestionSemanticReadingContract(revision) {
 			t.Fatalf("frozen %q received the wrong answer body wire", revision)
 		}
 		items := blocks["items"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
 		_, itemText := items["text"]
 		_, itemSources := items["citation_ids"]
-		if itemText != (revision == domain.QuestionReadingV2) || itemSources != itemText {
+		if itemText != domain.QuestionSemanticReadingContract(revision) || itemSources != itemText {
 			t.Fatal("reading answer list items do not own their text and references")
 		}
 	}

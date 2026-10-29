@@ -580,7 +580,7 @@ func projectToolHistory(messages []*schema.Message, dropLast ...bool) []*schema.
 	return out
 }
 func (s *session) projectSourceReads(messages []*schema.Message) []*schema.Message {
-	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+	if s.semanticQuestionReading() {
 		return s.projectQuestionSourceReads(messages)
 	}
 	if s.boundedSourceContext() {

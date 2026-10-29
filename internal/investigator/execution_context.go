@@ -93,7 +93,7 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		s.cp.Protocol = domain.ArticleDraftProtocol
 	}
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
-	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+	if s.semanticQuestionReading() {
 		instruction = questionReadingInstructions
 	} else if s.boundedSourceContext() {
 		instruction += "\n" + s.sourceInstructions()

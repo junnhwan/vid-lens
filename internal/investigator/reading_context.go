@@ -38,11 +38,63 @@ func (s *session) questionReading() bool {
 	return s.turn != nil && s.cp.ExecutionContract != nil && domain.QuestionReadingContract(s.cp.ExecutionContract.InputRevision)
 }
 
-func (s *session) questionReviewReading(source, payload map[string]any, catalog map[string]domain.Citation) {
-	if !s.questionReading() {
-		return
+func (s *session) semanticQuestionReading() bool {
+	return s.turn != nil && s.cp.ExecutionContract != nil && domain.QuestionSemanticReadingContract(s.cp.ExecutionContract.InputRevision)
+}
+
+func (s *session) scopedQuestionReview() bool {
+	return s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV3
+}
+
+func (s *session) indexedReview() bool {
+	return s.scopedQuestionReview() || s.boundedSourceContext() && s.chunkedSource()
+}
+
+// A scoped review may cite only originals actually delivered to it. Preserve
+// custom citations only when all their source segments are present.
+func questionReviewCatalog(source map[string]any, catalog map[string]domain.Citation) (map[string]domain.Citation, error) {
+	passages, ok := source["transcript"].([]sourcePassage)
+	if !ok {
+		return nil, domain.Err(422, "INTERNAL_FAILURE", "问答审核缺少已选定的原文范围。")
 	}
-	source["transcript"] = readingOriginals(s.transcript, nil)
+	delivered := map[string]bool{}
+	for _, passage := range passages {
+		delivered[passage.ID] = true
+	}
+	out := map[string]domain.Citation{}
+	for alias, citation := range catalog {
+		if citation.Kind == "video_text" && (len(citation.SegmentIDs) == 0 || slices.ContainsFunc(citation.SegmentIDs, func(id string) bool { return !delivered[id] })) {
+			continue
+		}
+		out[alias] = citation
+	}
+	return out, nil
+}
+
+func (s *session) questionReviewReading(source, payload map[string]any, catalog map[string]domain.Citation) error {
+	if !s.questionReading() {
+		return nil
+	}
+	if s.scopedQuestionReview() {
+		var err error
+		catalog, err = questionReviewCatalog(source, catalog)
+		if err != nil {
+			return err
+		}
+		// The selector has already gathered every required passage. Compact
+		// those originals without replacing the selection with the full video.
+		passages := source["transcript"].([]sourcePassage)
+		rows := make([][5]any, 0, len(passages))
+		for _, passage := range passages {
+			rows = append(rows, [5]any{passage.Alias, passage.StartMS, passage.EndMS, passage.Text, passage.Origin})
+		}
+		source["transcript"] = map[string]any{"columns": []string{"alias", "start_ms", "end_ms", "text", "origin"}, "rows": rows}
+		source["source_coverage"] = map[string]any{"delivered_segments": len(passages), "total_segments": len(s.transcript), "scope": "cited_originals_and_neighbors"}
+		source["question"] = s.turn.Question
+		source["text_access"] = "Only the selected original passages are delivered, each complete and in chronological order. Each row follows transcript.columns exactly; text, timestamps and provenance are unchanged. The remaining video is indexed, not read. Missing necessary evidence requires not_assessed so the author can retrieve and cite it before resubmitting."
+	} else {
+		source["transcript"] = readingOriginals(s.transcript, nil)
+	}
 	aliases := map[string]string{}
 	windows := map[string]domain.Range{}
 	for i, segment := range s.transcript {
@@ -71,4 +123,8 @@ func (s *session) questionReviewReading(source, payload map[string]any, catalog 
 	}
 	payload["citation_catalog"] = bindings
 	source["reading_contract"] = "Every original text/window/origin is preserved. A citation_catalog tN:video_text tag binds that exact original alias and its media-intersected window; object entries retain custom original/range/quote bindings. Canonical identities are server-owned and already mechanically validated. Judge only this question's candidate and its evidence, with the full source available for necessary context."
+	if s.scopedQuestionReview() {
+		source["reading_contract"] = "citation_catalog binds only delivered originals and available non-text evidence. A tN:video_text tag binds that exact original alias and its media-intersected window; object entries retain custom original/range/quote bindings. Canonical identities are server-owned and already mechanically validated. Judge only the current question's candidate against the supplied evidence; the source index is navigation, never proof of an unread claim."
+	}
+	return nil
 }

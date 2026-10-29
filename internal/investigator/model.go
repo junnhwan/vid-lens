@@ -259,7 +259,7 @@ func NormalizeToolImages(input []*schema.Message) []*schema.Message {
 func (s *session) modelImageInput(input []*schema.Message) []*schema.Message {
 	out := NormalizeToolImages(input)
 	c := s.cp.ExecutionContract
-	if c == nil || (c.Version != domain.ArticleLoopV2 && c.InputRevision != domain.QuestionReadingV2) {
+	if c == nil || (c.Version != domain.ArticleLoopV2 && !domain.QuestionSemanticReadingContract(c.InputRevision)) {
 		return out
 	}
 	move := false

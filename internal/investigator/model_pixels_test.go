@@ -16,12 +16,8 @@ import (
 )
 
 func TestCurrentContractsDeliverAllPixelsInFinalUserMessage(t *testing.T) {
-	for _, version := range []string{domain.ArticleLoopV2, domain.ExecutionContractV9} {
-		t.Run(version, func(t *testing.T) {
-			contract := &domain.ExecutionContract{Version: version}
-			if version == domain.ExecutionContractV9 {
-				contract.InputRevision = domain.QuestionReadingV2
-			}
+	for _, contract := range []*domain.ExecutionContract{{Version: domain.ArticleLoopV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV3}} {
+		t.Run(contract.Version+contract.InputRevision, func(t *testing.T) {
 			s := &session{cp: checkpoint{ExecutionContract: contract}}
 			image := func(id string) *schema.Message {
 				return &schema.Message{Role: schema.User, UserInputMultiContent: []schema.MessageInputPart{{Type: schema.ChatMessagePartTypeText, Text: "original metadata " + id}, {Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: domain.Ptr(base64.StdEncoding.EncodeToString([]byte(id))), MIMEType: "image/jpeg"}}, Extra: map[string]any{"frame_id": id}}}}

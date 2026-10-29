@@ -71,6 +71,16 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 }
 
 func (s *session) executeReviewTask(ctx context.Context, hash string, candidate any, hints map[string]any, catalog map[string]domain.Citation, task reviewTask) ([]reviewUnitResult, error) {
+	if s.scopedQuestionReview() {
+		source, err := s.indexedReviewSource(task, catalog)
+		if err != nil {
+			return nil, err
+		}
+		catalog, err = questionReviewCatalog(source, catalog)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ids := []string{}
 	for _, unit := range task.Units {
 		ids = append(ids, unit.ID)
@@ -222,7 +232,7 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	// Context is deliberately complete and unchanged across smaller tasks. A
 	// local verdict may depend on a premise in another chapter or source segment.
 	payload := map[string]any{"request_id": id, "review_protocol": s.boundedReviewProtocol(), "review_mode": task.Mode, "units": task.Units, "candidate_context": candidate, "citation_catalog": hints, "batch_frame_ids": ids}
-	if s.boundedSourceContext() && s.chunkedSource() {
+	if s.indexedReview() {
 		var err error
 		source, err = s.indexedReviewSource(task, catalog)
 		if err != nil {
@@ -238,7 +248,7 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 		payload["evidence_bindings"] = reviewEvidenceBindings(task, catalog, source)
 		instructions += "\n" + reviewCitationBindingInstructions
 	}
-	if s.boundedSourceContext() && s.chunkedSource() {
+	if s.indexedReview() {
 		instructions += "\n本轮source.transcript是本单元全部引用原文及时间邻居，source_index/derived_notes只是全片导航。不能仅凭材料卡或作者描述确认具体断言；必要材料未交付则not_assessed，不能把未知判为支持。"
 	}
 	if s.usesModalityReview() {
@@ -248,14 +258,16 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 		}
 		source["execution_context"] = scope
 		modalityInstructions := modalityReviewInstructions
-		if s.boundedSourceContext() && s.chunkedSource() {
+		if s.indexedReview() {
 			modalityInstructions = strings.Replace(modalityInstructions, "visual收到完整原始文字及本单元全部引用图片", "visual收到本单元全部引用原文及时间邻居、全片材料索引和本单元全部引用图片", 1)
 		}
 		if !s.usesJointReview() {
 			instructions += "\n" + modalityInstructions
 		}
 	}
-	s.questionReviewReading(source, payload, catalog)
+	if err := s.questionReviewReading(source, payload, catalog); err != nil {
+		return nil, err
+	}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")
 	if err != nil {

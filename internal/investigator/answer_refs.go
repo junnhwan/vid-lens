@@ -137,7 +137,7 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		return textResult(map[string]any{"accepted_for_publication": true}), nil
 	}
 	submit := func(ctx context.Context, in answerInput) (*schema.ToolResult, error) { return persist(ctx, in, nil) }
-	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+	if s.semanticQuestionReading() {
 		return add(utils.InferEnhancedTool("submit_answer", "Submit the focused answer in the same semantic reading format as article context: paragraph/quote/code use text and citation_ids; list items use text and citation_ids; table rows use cells and citation_ids; figures use frame_ids/caption/citation_ids. The server builds rendering nodes and figure layout. Never emit inline content arrays. Existing source and independent semantic validation still apply.", func(ctx context.Context, in readingAnswerInput) (*schema.ToolResult, error) {
 			blocks, err := answerReadingBlocks(in.Blocks)
 			if err != nil {

@@ -91,14 +91,22 @@ type ExecutionContract struct {
 
 const QuestionReadingV1 = "qa-article-reading-2026-10-22-v1"
 const QuestionReadingV2 = "qa-article-reading-2026-10-22-v2"
+const QuestionReadingV3 = "qa-article-reading-2026-10-29-v3"
 
 func QuestionReadingContract(version string) bool {
-	return version == QuestionReadingV1 || version == QuestionReadingV2
+	return version == QuestionReadingV1 || QuestionSemanticReadingContract(version)
+}
+
+// V3 retains V2's answer, source-history and pixel delivery contracts. Only the
+// independent review's evidence selection changes: cited passages and neighbors
+// remain complete; unrelated source stays retrievable instead of being inlined.
+func QuestionSemanticReadingContract(version string) bool {
+	return version == QuestionReadingV2 || version == QuestionReadingV3
 }
 
 func QuestionInputRevision(articleVersion string) string {
 	if articleVersion == ArticleLoopV2 {
-		return QuestionReadingV2
+		return QuestionReadingV3
 	}
 	return ""
 }

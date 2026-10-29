@@ -10,7 +10,7 @@ import (
 )
 
 func TestQuestionWorkingContextKeepsDistantOriginalsAndDeduplicatesReads(t *testing.T) {
-	s := &session{turn: &domain.Turn{}, snapshot: domain.Snapshot{ID: "snapshot"}, cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV2}}}
+	s := &session{turn: &domain.Turn{}, snapshot: domain.Snapshot{ID: "snapshot"}, cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: domain.QuestionInputRevision(domain.ArticleLoopV2)}}}
 	for i := 0; i < 3; i++ {
 		s.transcript = append(s.transcript, domain.Segment{ID: fmt.Sprint("original", i), StartMS: int64(i * 100), EndMS: int64((i + 1) * 100), Text: fmt.Sprint("Unique necessary original ", i), Origin: "asr"})
 	}

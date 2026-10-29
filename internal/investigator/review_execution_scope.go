@@ -43,7 +43,7 @@ func (s *session) reviewExecutionContext(ctx context.Context) (map[string]any, e
 		"transcript_origins":           origins,
 		"scope_rule":                   "Frame identities describe delivered sampling instants, not visible content or continuous visual coverage. The complete original transcript and this task's actual pixels are supplied separately.",
 	}
-	if s.boundedSourceContext() && s.chunkedSource() {
+	if s.indexedReview() {
 		scope["text_access"] = "indexed original passages, with the complete chronological source navigation ledger"
 		scope["scope_rule"] = "Frame identities describe sampled delivery instants, not visible content or continuous coverage. All cited original text and its chronological neighbors accompany the complete navigation ledger; derived notes do not prove claims."
 	}

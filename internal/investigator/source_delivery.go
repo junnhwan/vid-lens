@@ -56,10 +56,22 @@ func (s *session) deliverOverviewBatch(ctx context.Context, messages *[]*schema.
 // plus the complete chronological navigation ledger. It may not silently
 // discard a required passage when even one atomic claim exceeds capacity.
 func (s *session) indexedReviewSource(task reviewTask, catalog map[string]domain.Citation) (map[string]any, error) {
-	out := s.sourceContext()
+	var out map[string]any
+	if s.scopedQuestionReview() {
+		out = map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "question": s.turn.Question, "source_index": s.sourceChunks(), "source_index_protocol": sourceIndexProtocol}
+	} else {
+		out = s.sourceContext()
+	}
 	delete(out, "current_chunk")
 	selected := map[string]bool{}
 	aliases := sourceAliases(task.Units)
+	if s.scopedQuestionReview() {
+		// Summary units inherit their body's citations even when output-budget
+		// splitting puts the summary into a separate review task.
+		for _, unit := range task.Units {
+			aliases = append(aliases, unit.CitationAliases...)
+		}
+	}
 	if len(aliases) > 0 {
 		for _, alias := range aliases {
 			if c, ok := catalog[alias]; ok {

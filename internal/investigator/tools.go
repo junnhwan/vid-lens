@@ -182,7 +182,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 				target = &composedAnswerInput{}
 			}
 		}
-		if t.session != nil && t.session.questionReading() && t.session.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+		if t.session != nil && t.session.semanticQuestionReading() {
 			target = &readingAnswerInput{}
 		}
 	case "record_observation":
