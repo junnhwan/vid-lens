@@ -124,6 +124,11 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		if e := s.reviewAnswer(ctx, a); e != nil {
 			return nil, e
 		}
+		if s.focusedQuestion() {
+			if e := s.answerEvidence(ctx, &a); e != nil {
+				return nil, e
+			}
+		}
 		var args any = in
 		if s.policy().ComposedAnswers {
 			args = map[string]any{"answer": in, "parts": parts}

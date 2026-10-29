@@ -45,6 +45,16 @@ func TestQuestionPassagesValidateContinuousQuotesAndTotalLimit(t *testing.T) {
 	}
 }
 
+func TestQuestionChapterMustBelongToArticle(t *testing.T) {
+	article := passageArticle()
+	if err := ValidateQuestionPassages(article, QuestionContext{SectionID: "s1"}, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateQuestionPassages(article, QuestionContext{SectionID: "foreign"}, 1000); err == nil {
+		t.Fatal("foreign chapter accepted without a selection")
+	}
+}
+
 func TestQuestionPassagesNormalizeUnicodeAndPreserveLegacyJSON(t *testing.T) {
 	article := passageArticle()
 	article.Sections[0].Blocks[0].Content[0].Text = "甲😀\u00a0乙"

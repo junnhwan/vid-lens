@@ -224,6 +224,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		err = errors.New("工具参数为空")
 	} else if target != nil {
 		checked := args.Text
+		if t.name == "submit_answer" && t.session != nil && t.session.focusedQuestion() {
+			checked = normalizeQuestionJSON(checked)
+		}
 		if t.session.authoring() {
 			checked = normalizeAuthoringJSON(checked)
 			checked = normalizeAuthoringContainers(t.name, checked)
@@ -287,6 +290,11 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		}
 	}
 	delegated := args
+	if t.name == "submit_answer" && t.session != nil && t.session.focusedQuestion() && args != nil {
+		copy := *args
+		copy.Text = normalizeQuestionJSON(copy.Text)
+		delegated = &copy
+	}
 	if t.session.authoring() && args != nil {
 		copy := *args
 		copy.Text = normalizeAuthoringJSON(args.Text)

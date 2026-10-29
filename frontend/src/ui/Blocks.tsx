@@ -22,9 +22,7 @@ export function citationClusterLabel(cites: Citation[]): string {
   const starts = cites.map(citationStart).filter((value): value is number => value != null)
   if (starts.length === cites.length && starts.length > 1) {
     const min = Math.min(...starts)
-    const max = Math.max(...starts)
-    if (formatClock(min) === formatClock(max)) return formatClock(min)
-    return `${formatClock(min)}–${formatClock(max)}`
+    return `${formatClock(min)} · ${cites.length}处来源`
   }
   return `${citationClock(cites[0])} +${cites.length - 1}`
 }

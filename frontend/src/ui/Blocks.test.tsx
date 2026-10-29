@@ -37,8 +37,8 @@ describe("reading and answer citation labels", () => {
     expect(html).not.toMatch(/01:00|02:00/)
   })
 
-  it("continues to group timestamps backed by subtitle cues and real frames", () => {
-    expect(citationClusterLabel([subtitle, frame])).toBe("01:15–01:30")
+  it("labels separate sources without inventing a continuous time range", () => {
+    expect(citationClusterLabel([subtitle, frame])).toBe("01:15 · 2处来源")
     const html = renderCitations([subtitle, frame])
     expect(html).toContain(">01:30<")
     expect(html).toContain(">01:15<")

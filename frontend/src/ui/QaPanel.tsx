@@ -6,11 +6,14 @@ import { AnswerBody } from "./AnswerBody"
 import { ActivityList } from "./ActivityList"
 import { ReferenceCard } from "./ReferenceCard"
 import { prefersReduced } from "./motion"
+import type { PendingQuestion } from "../app/pendingQuestion"
 
 export function QaPanel({
   open,
   historyState,
   turns,
+  pendingQuestion,
+  onRestoreQuestion,
   stepsFor,
   frames,
   draft,
@@ -49,6 +52,8 @@ export function QaPanel({
   open: boolean
   historyState?: Record<string, string>
   turns: TurnView[]
+  pendingQuestion?: PendingQuestion | null
+  onRestoreQuestion?: () => void
   stepsFor: (turn: TurnView) => ActivityStep[]
   frames: Map<string, Frame>
   draft: string
@@ -125,11 +130,12 @@ export function QaPanel({
   useLayoutEffect(() => {
     const log = logRef.current
     if (!log) return
+    if (pendingQuestion?.phase === "sending") nearBottom.current = true
     if (nearBottom.current) {
       log.scrollTop = log.scrollHeight
       setNewAnswer(false)
     } else if (turns.length) setNewAnswer(true)
-  }, [turns, open])
+  }, [turns, open, pendingQuestion])
 
   return (
     <section id="qa" className="qa" aria-labelledby="qa-title" aria-hidden={!open} ref={sectionRef}>
@@ -168,7 +174,7 @@ export function QaPanel({
           }
         }}
       >
-        {!turns.length ? (
+        {!turns.length && !pendingQuestion ? (
           <div className="qa-empty">
             <p>可以问文章里的内容，也可以从某张图问起。</p>
             <div className="qa-prompts">
@@ -260,6 +266,16 @@ export function QaPanel({
             </article>
           )
         })}
+        {pendingQuestion ? (
+          <article className="turn pending-turn" aria-label="待发送的提问">
+            <div className="question-message">
+              <div className="message-byline question-byline"><span className="user-monogram" aria-hidden="true">你</span><span>你的提问</span></div>
+              <h3 className="turn-q">{pendingQuestion.question}</h3>
+              <p className="question-delivery" role="status">{pendingQuestion.phase === "sending" ? "正在发送…" : "发送尚未确认，问题已保留。"}</p>
+              {pendingQuestion.phase === "failed" && onRestoreQuestion ? <button type="button" className="disclosure" onClick={onRestoreQuestion}>编辑重试</button> : null}
+            </div>
+          </article>
+        ) : null}
         {newAnswer ? (
           <button
             type="button"

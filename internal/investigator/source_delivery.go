@@ -64,6 +64,14 @@ func (s *session) indexedReviewSource(task reviewTask, catalog map[string]domain
 	}
 	delete(out, "current_chunk")
 	selected := map[string]bool{}
+	if s.focusedQuestion() {
+		// Keep the same bounded, contiguous question context for the reviewer.
+		// Sparse citation anchors must not hide the rest of an enumerated list.
+		passages, _ := s.questionOriginals()
+		for _, passage := range passages {
+			selected[passage.ID] = true
+		}
+	}
 	aliases := sourceAliases(task.Units)
 	if s.scopedQuestionReview() {
 		// Summary units inherit their body's citations even when output-budget

@@ -268,6 +268,9 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	if err := s.questionReviewReading(source, payload, catalog); err != nil {
 		return nil, err
 	}
+	if s.focusedQuestion() {
+		instructions += "\n本轮是聚焦问答，只核对会改变答案的实质事实。所给章节连续原文与引用邻居均为实际来源。未交付的内容用not_assessed反馈，不把未读当成原视频未提及；如原文支持讲者对图表的介绍，允许明确归因给讲者，不能声称亲眼看过未交付的画面。不要为一般概括要求额外调查或长篇论证。一次指出全部实质问题，每个问题给出最小可定位的断言和来源。"
+	}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")
 	if err != nil {

@@ -98,7 +98,7 @@ export function Example() {
   }, [route.id, published])
   const current = data?.id === route.id ? data : null
   const choice = published.find((item) => item.id === route.id)
-  const questions = useExampleQuestions(current?.id ?? null, current?.article.title, current?.article.sections[0]?.title)
+  const questions = useExampleQuestions(current?.id ?? null, current?.article.title, current?.article.sections[0]?.title, current?.article.sections[0]?.id)
   const frames = useMemo(() => {
     const map = new Map((current?.frames || []).map((frame) => [frame.id, frame]))
     for (const frame of questions.frames) map.set(frame.id, frame)
@@ -264,6 +264,8 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
       <QaPanel
         open={questions.open}
         turns={questions.turns}
+        pendingQuestion={questions.pendingQuestion}
+        onRestoreQuestion={questions.restoreQuestion}
         stepsFor={questions.stepsFor}
         frames={frames}
         draft={questions.draft}

@@ -7,14 +7,15 @@ import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, normalizeQuote, passageContext, type PassageChoice } from "../contract/text"
 import type { ActivityStep, Conversation, Frame, SessionResponse, TurnView } from "../contract/types"
-import { starterPrompts } from "../app/labels"
+import { starterPrompts, starterSection } from "../app/labels"
+import type { PendingQuestion } from "../app/pendingQuestion"
 import { errorText, normalizeStep } from "../app/visitorContract"
 
 function browserStore(): KeyValue {
   return localStorage
 }
 
-export function useExampleQuestions(articleID: string | null, title: string | undefined, sectionTitle: string | undefined) {
+export function useExampleQuestions(articleID: string | null, title: string | undefined, sectionTitle: string | undefined, sectionID?: string) {
   const apiRef = useRef<HttpApi | null>(null)
   const sessionRef = useRef<SessionResponse | null>(null)
   const streamRef = useRef<ResourceStream | null>(null)
@@ -34,6 +35,10 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   const [externalAllowed, setExternalAllowed] = useState(false)
   const [referenceLinks, setReferenceLinks] = useState("")
   const [busy, setBusy] = useState(false)
+  const sending = useRef(false)
+  const restoreSend = useRef<(() => void) | null>(null)
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null)
+  const conversationLoad = useRef<{ epoch: number; promise: Promise<Conversation | null> } | null>(null)
   const [error, setError] = useState("")
   const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({})
   const [focusToken, setFocusToken] = useState(0)
@@ -152,11 +157,11 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     return value
   }
 
-  async function ensureConversation(id: string, epoch: number) {
+  async function loadConversation(id: string, epoch: number, force: boolean) {
     await ensureSession()
     if (epoch !== generation.current) return null
     const current = conversationRef.current
-    if (current?.article_id === id) return current
+    if (!force && current?.article_id === id) return current
     const response = await api().exampleConversation(id)
     if (epoch !== generation.current || response.conversation.article_id !== id) return null
     conversationRef.current = response.conversation
@@ -175,6 +180,12 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     const active = [...page.items].reverse().find((turn) => !isTerminalStatus(turn.turn.status))
     if (active) startStream(active, epoch)
     return response.conversation
+  }
+  async function ensureConversation(id: string, epoch: number, force = false): Promise<Conversation | null> {
+    if (conversationLoad.current?.epoch === epoch) return conversationLoad.current.promise
+    const entry = { epoch, promise: loadConversation(id, epoch, force) }
+    conversationLoad.current = entry
+    try { return await entry.promise } finally { if (conversationLoad.current === entry) conversationLoad.current = null }
   }
 
   useEffect(() => {
@@ -197,6 +208,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     setError("")
     setExpanded({})
     setBusy(false)
+    sending.current = false; restoreSend.current = null; conversationLoad.current = null; setPendingQuestion(null)
   }, [articleID])
 
   useEffect(() => () => {
@@ -216,6 +228,8 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     passageChip,
     prompts: starterPrompts(title, sectionTitle),
     busy,
+    pendingQuestion,
+    restoreQuestion: () => { if (pendingQuestion?.phase === "failed") { restoreSend.current?.(); setPendingQuestion(null); setFocusToken(value => value + 1) } },
     error,
     expanded,
     focusToken,
@@ -288,30 +302,41 @@ export function useExampleQuestions(articleID: string | null, title: string | un
       }).catch((cause: unknown) => setError(errorText(cause)))
     },
     send: () => {
+      if (sending.current) return
       const text = draft.trim()
       if (!text || !articleID) {
         setError("先写下一个问题。")
         return
       }
       const epoch = generation.current
+      if (turnsRef.current.some(turn => !isTerminalStatus(turn.turn.status))) { setError("上一轮回答仍在进行。"); return }
+      sending.current = true
       setBusy(true)
       setError("")
       const sentFrame = frameChip
       const sentPassage = passageChip
+      const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, sectionID && sectionTitle ? { id: sectionID, title: sectionTitle } : undefined) }
+      restoreSend.current = () => { setDraft(text); setFrameChip(sentFrame); setPassageChip(sentPassage); setExternalAllowed(externalAllowed); setReferenceLinks(referenceLinks) }
+      setDraft("")
+      setPendingQuestion({ question: text, context: sentContext, phase: "sending" })
       void (async () => {
         try {
           const sessionValue = await ensureSession()
+          if (epoch !== generation.current) return
           const max = sessionValue.capabilities.question_chars_max
           if (sentPassage && codePointLength(normalizeQuote(sentPassage.quote)) > sessionValue.capabilities.selection_chars_max) {
             setError("选中文字合计超过了可选长度。")
+            setPendingQuestion(null); setDraft(value => value || text)
             return
           }
           if (max != null && codePointLength(text) > max) {
             setError("这个问题太长了。")
+            setPendingQuestion(null); setDraft(value => value || text)
             return
           }
           if (turnsRef.current.some((turn) => !isTerminalStatus(turn.turn.status))) {
             setError("上一轮回答仍在进行。")
+            setPendingQuestion(null); setDraft(value => value || text)
             return
           }
           const current = await ensureConversation(articleID, epoch)
@@ -320,10 +345,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
             question: text,
             ...(externalAllowed ? { allow_external_sources: true, reference_urls: referenceLinks.split(/\n/).map((item) => item.trim()).filter(Boolean) } : {}),
             expected_last_turn_id: current.last_turn_id,
-            context: {
-              frame_id: sentFrame?.id ?? null,
-              ...passageContext(sentPassage),
-            },
+            context: sentContext,
           }
           const body = JSON.stringify(payload)
           const slot = `example-turn:${current.id}`
@@ -334,7 +356,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
           const accepted = await api().createTurn(current.id, key, payload)
           if (pendingWrite(browserStore(), slot)?.key === key) forgetWrite(browserStore(), slot)
           if (epoch !== generation.current) return
-          setDraft((value) => (value.trim() === text ? "" : value))
+          setPendingQuestion(null)
           setExternalAllowed(false)
           setReferenceLinks("")
           setFrameChip((value) => (value?.id === sentFrame?.id ? null : value))
@@ -344,12 +366,15 @@ export function useExampleQuestions(articleID: string | null, title: string | un
           startStream(accepted.body, epoch)
         } catch (cause) {
           if (epoch !== generation.current) return
+          setPendingQuestion({ question: text, context: sentContext, phase: "failed" })
+          setDraft(value => value || text)
           if (isApiError(cause) && (cause.code === "TURN_IN_PROGRESS" || cause.code === "TURN_HISTORY_CHANGED")) {
             forgetWrite(browserStore(), `example-turn:${conversationRef.current?.id || "unknown"}`)
+            try { await ensureConversation(articleID, epoch, true) } catch { /* Keep the original submission error and recoverable question. */ }
           }
-          setError(errorText(cause))
+          if (epoch === generation.current) setError(errorText(cause))
         } finally {
-          if (epoch === generation.current) setBusy(false)
+          if (epoch === generation.current) { sending.current = false; setBusy(false) }
         }
       })()
     },

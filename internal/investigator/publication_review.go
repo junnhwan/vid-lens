@@ -16,7 +16,7 @@ func (s *session) requireAnswerPublicationReview(ctx context.Context, a domain.A
 	if s.stagedWorkflow() {
 		return s.requireWorkflowReview(ctx, workflowArticleCandidate(workflowAnswerArticle(a)), a.Citations)
 	}
-	candidate := map[string]any{"kind": a.Kind, "summary": a.Summary, "blocks": a.Blocks, "parts": a.Parts, "limitations": a.Limitations}
+	candidate := s.answerReviewCandidate(a)
 	err := s.requirePublicationReview(ctx, candidate, a.Citations)
 	var problem *domain.Problem
 	if err == nil || len(a.Parts) != 0 || !errors.As(err, &problem) || problem.Code != "REVIEW_COVERAGE_INCOMPLETE" {

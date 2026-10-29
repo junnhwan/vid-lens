@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -225,8 +226,9 @@ func TestEnginePublicationRequiresCurrentCompleteReview(t *testing.T) {
 }
 
 func TestEngineAnswerPublicationRequiresCurrentReview(t *testing.T) {
-	for _, fault := range []string{"approved", "empty_parts", "missing_review", "changed_summary", "changed_parts", "mixed_empty_parts_coverage"} {
-		t.Run(fault, func(t *testing.T) {
+	for _, testCase := range []string{"approved", "empty_parts", "missing_review", "changed_summary", "changed_parts", "mixed_empty_parts_coverage", "v4_approved", "v4_empty_parts", "v4_missing_review", "v4_changed_summary", "v4_changed_parts"} {
+		t.Run(testCase, func(t *testing.T) {
+			fault := strings.TrimPrefix(testCase, "v4_")
 			db, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
 			turn, claim := testsupport.Question(t, db)
@@ -259,6 +261,10 @@ func TestEngineAnswerPublicationRequiresCurrentReview(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := &session{engine: &Engine{Store: db, Resources: resources, Config: cfg}, claim: claim, profile: profile, snapshot: snap, transcript: transcript, turn: &turn, article: &article, cp: checkpoint{SchemaVersion: 1, Ready: true, Protocol: protocol, LayoutVersion: "source-context-v2", HarnessRevision: 16, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV2, RunID: claim.Run.ID}, Inspections: map[string][]string{}, Repeated: map[string]int{}, Messages: []*schema.Message{schema.SystemMessage("frozen question fixture")}}}
+			if strings.HasPrefix(testCase, "v4_") {
+				s.cp.ExecutionContract.Version = domain.ExecutionContractV9
+				s.cp.ExecutionContract.InputRevision = domain.QuestionReadingV4
+			}
 			if _, err := s.makeTools(); err != nil {
 				t.Fatal(err)
 			}

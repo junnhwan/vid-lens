@@ -73,6 +73,37 @@ afterEach(async () => {
 })
 
 describe("visitor request ownership", () => {
+
+  it("moves a question out of the composer before the send returns and prevents duplicate sends", async () => {
+    const pending = deferred<{ body: TurnView }>()
+    api.createTurn.mockReturnValueOnce(pending.promise)
+    await open("A")
+    await act(async () => view.toggleQa())
+    const loads = api.conversation.mock.calls.length
+    await act(async () => view.setDraft("现在的问题"))
+    await act(async () => { view.send(); view.send() })
+    expect(view.draft).toBe("")
+    expect(view.pendingQuestion?.question).toBe("现在的问题")
+    expect(api.createTurn).toHaveBeenCalledTimes(1)
+    expect(api.conversation).toHaveBeenCalledTimes(loads)
+    await act(async () => view.setDraft("下一条草稿"))
+    await act(async () => pending.resolve({ body: turn("A", "queued") }))
+    expect(view.pendingQuestion).toBeNull()
+    expect(view.draft).toBe("下一条草稿")
+  })
+
+  it("restores a failed send without overwriting a newer draft", async () => {
+    const pending = deferred<{ body: TurnView }>()
+    api.createTurn.mockReturnValueOnce(pending.promise)
+    await open("A")
+    await act(async () => view.setDraft("需要保留的问题"))
+    await act(async () => view.send())
+    await act(async () => view.setDraft("新草稿"))
+    await act(async () => pending.reject(new Error("network unavailable")))
+    expect(view.draft).toBe("新草稿")
+    expect(view.pendingQuestion?.phase).toBe("failed")
+    expect(view.pendingQuestion?.question).toBe("需要保留的问题")
+  })
   it("sends all selected paragraphs with their own anchors", async () => {
     api.createTurn.mockResolvedValue({ body: turn("A", "queued") })
     await open("A")

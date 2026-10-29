@@ -95,6 +95,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
 	if s.semanticQuestionReading() {
 		instruction = questionReadingInstructions
+		if s.focusedQuestion() {
+			instruction += questionFocusInstructions
+		}
 	} else if s.boundedSourceContext() {
 		instruction += "\n" + s.sourceInstructions()
 	}

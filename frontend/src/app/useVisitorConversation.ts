@@ -18,7 +18,8 @@ import type {
   StreamPosition,
   TurnView
 } from "../contract/types"
-import { starterPrompts } from "./labels"
+import { starterPrompts, starterSection } from "./labels"
+import type { PendingQuestion } from "./pendingQuestion"
 import type { VisitorContext } from "./visitorContext"
 import { ObsoleteRequest, isTurnView, normalizeStep } from "./visitorContract"
 export function useVisitorConversation(context: VisitorContext, frameMap: Map<string, Frame>, loadHistory: (turnId?: string) => Promise<void>, absorb: (frames: Frame[]) => void) {
@@ -45,6 +46,10 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
   const [passageChip, setPassageChip] = useState<PassageChoice | null>(null)
   const [qaError, setQaError] = useState("")
   const [qaBusy, setQaBusy] = useState(false)
+  const sending = useRef(false)
+  const restoreSend = useRef<(() => void) | null>(null)
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null)
+  const conversationLoad = useRef<{ id: string; epoch: number; promise: Promise<Conversation> } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({})
   const [focusToken, setFocusToken] = useState(0)
   const conversationRef = useRef<Conversation | null>(null)
@@ -152,7 +157,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     })
     workspace.turn.attach(id, stream, view.stream.cursor)
   }
-  async function ensureConversation(force: boolean) {
+  async function loadConversation(force: boolean) {
     const current = context.request()
     const rt = context.runtime()
     if (!current || !rt)
@@ -189,6 +194,16 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       if (!ownsRequest(gen, id)) throw new ObsoleteRequest()
       throw error
     }
+  }
+  async function ensureConversation(force: boolean): Promise<Conversation> {
+    const id = context.request()?.request.id ?? ""
+    const epoch = workspace.epoch
+    const loading = conversationLoad.current
+    if (loading?.id === id && loading.epoch === epoch) return loading.promise
+    const promise = loadConversation(force)
+    const entry = { id, epoch, promise }
+    conversationLoad.current = entry
+    try { return await promise } finally { if (conversationLoad.current === entry) conversationLoad.current = null }
   }
   useEffect(() => {
     if (!qaOpen) {
@@ -230,6 +245,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     conversationRef.current = null; turnsRef.current = []; turnStepsRef.current = {}
     setConversation(null); setTurns([]); setTurnSteps({}); setQaOpen(false); setQaError(""); setQaBusy(false)
     setDraft(""); setExternalAllowed(false); setReferenceLinks(""); setFrameChip(null); setPassageChip(null); setExpanded({})
+    sending.current = false; restoreSend.current = null; conversationLoad.current = null; setPendingQuestion(null)
   }
   return {
     reset, hide: () => setQaOpen(false), turn: (id: string) => turnsRef.current.find(t => t.turn.id === id),
@@ -251,6 +267,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       suggesting,
       prompts,
       qaBusy,
+      pendingQuestion,
+      restoreQuestion: () => { if (pendingQuestion?.phase === "failed") { restoreSend.current?.(); setPendingQuestion(null); setFocusToken(value => value + 1) } },
       qaError,
       expanded,
       focusToken,
@@ -292,6 +310,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       },
       send: () =>
         void (async () => {
+          if (sending.current) return
           const text = draft.trim()
           if (!text) {
             setQaError("先写下一个问题。")
@@ -310,18 +329,22 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
           const id = context.request()?.request.id
           if (!rt || !id) return
           const gen = workspace.epoch
-          setQaBusy(true)
-          setQaError("")
           const sentFrame = frameChip
           const sentPassage = passageChip
           const selectionMax = context.session()?.capabilities.selection_chars_max
           if (sentPassage && selectionMax != null && codePointLength(normalizeQuote(sentPassage.quote)) > selectionMax) {
-            setQaBusy(false)
             setQaError("选中文字合计超过了可选长度。")
             return
           }
+          const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, context.article()?.article.sections[0]) }
+          restoreSend.current = () => { setDraft(text); setFrameChip(sentFrame); setPassageChip(sentPassage); setExternalAllowed(externalAllowed); setReferenceLinks(referenceLinks) }
+          sending.current = true
+          setQaBusy(true)
+          setQaError("")
+          setDraft("")
+          setPendingQuestion({ question: text, context: sentContext, phase: "sending" })
           try {
-            const current = await ensureConversation(true)
+            const current = await ensureConversation(false)
             if (!ownsRequest(gen, id)) return
             const payload = {
               question: text,
@@ -335,10 +358,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
                 }
                 : {}),
               expected_last_turn_id: current.last_turn_id,
-              context: {
-                frame_id: sentFrame?.id ?? null,
-                ...passageContext(sentPassage),
-              },
+              context: sentContext,
             }
             const body = JSON.stringify(payload)
             const slot = `turn:${current.id}`
@@ -356,7 +376,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
             const accepted = await rt.api.createTurn(current.id, key, payload)
             if (pendingWrite(store(), slot)?.key === key) forgetWrite(store(), slot)
             if (!ownsRequest(gen, id)) return
-            setDraft((value) => (value.trim() === text ? "" : value))
+            setPendingQuestion(null)
             setExternalAllowed(false)
             setReferenceLinks("")
             setFrameChip((value) => (value?.id === sentFrame?.id ? null : value))
@@ -365,6 +385,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
             installTurn(accepted.body, true)
           } catch (error) {
             if (!ownsRequest(gen, id)) return
+            setPendingQuestion({ question: text, context: sentContext, phase: "failed" })
+            setDraft(value => value || text)
             if (isApiError(error) && (error.code === "TURN_IN_PROGRESS" || error.code === "TURN_HISTORY_CHANGED")) {
               forgetWrite(store(), `turn:${conversationRef.current?.id || "unknown"}`)
               setQaError(error.detail)
@@ -377,7 +399,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
             }
             await report(error, setQaError, conversationRef.current ? `turn:${conversationRef.current.id}` : undefined)
           } finally {
-            if (ownsRequest(gen, id)) setQaBusy(false)
+            if (ownsRequest(gen, id)) { sending.current = false; setQaBusy(false) }
           }
         })(),
       stopTurn: () =>

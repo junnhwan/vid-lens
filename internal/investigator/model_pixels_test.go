@@ -16,7 +16,7 @@ import (
 )
 
 func TestCurrentContractsDeliverAllPixelsInFinalUserMessage(t *testing.T) {
-	for _, contract := range []*domain.ExecutionContract{{Version: domain.ArticleLoopV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV3}} {
+	for _, contract := range []*domain.ExecutionContract{{Version: domain.ArticleLoopV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV2}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV3}, {Version: domain.ExecutionContractV9, InputRevision: domain.QuestionReadingV4}} {
 		t.Run(contract.Version+contract.InputRevision, func(t *testing.T) {
 			s := &session{cp: checkpoint{ExecutionContract: contract}}
 			image := func(id string) *schema.Message {

@@ -123,6 +123,9 @@ func (s *session) sourceSurveyPending() bool {
 }
 
 func (s *session) sourceContext() map[string]any {
+	if s.focusedQuestion() {
+		return s.focusedQuestionSource()
+	}
 	out := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original cue or coarse ASR windows, never invented sentence timestamps."}
 	if !s.chunkedSource() {
 		out["transcript"] = s.transcript

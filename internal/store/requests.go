@@ -411,7 +411,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if utf8.RuneCountInString(in.Question) > p.QuestionCharsMax || strings.TrimSpace(in.Question) == "" {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "问题为空或超过长度限制。")
 		}
-		if in.Context.Passage != nil || len(in.Context.Passages) > 0 {
+		if in.Context.SectionID != "" || in.Context.Passage != nil || len(in.Context.Passages) > 0 {
 			art, e := article(ctx, tx, c.ArticleID)
 			if e != nil {
 				return e

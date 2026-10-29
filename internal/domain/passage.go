@@ -30,6 +30,15 @@ func (c QuestionContext) SelectedPassages() []Passage {
 // article. Partial edges are allowed; interior blocks must be quoted in full.
 func ValidateQuestionPassages(article Article, c QuestionContext, maxChars int) error {
 	invalid := func(message string) error { return Err(422, "INVALID_CONTEXT", message) }
+	if c.SectionID != "" {
+		found := false
+		for _, section := range article.Sections {
+			found = found || section.ID == c.SectionID
+		}
+		if !found {
+			return invalid("无法定位这篇文章中的章节，请重新选择。")
+		}
+	}
 	if c.Passage != nil && len(c.Passages) > 0 {
 		return invalid("选段引用格式冲突，请重新选择。")
 	}

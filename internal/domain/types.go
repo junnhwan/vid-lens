@@ -345,9 +345,10 @@ type Passage struct {
 	Quote     string `json:"quote"`
 }
 type QuestionContext struct {
-	FrameID  *string   `json:"frame_id"`
-	Passage  *Passage  `json:"passage"`
-	Passages []Passage `json:"passages,omitempty"`
+	SectionID string    `json:"section_id,omitempty"`
+	FrameID   *string   `json:"frame_id"`
+	Passage   *Passage  `json:"passage"`
+	Passages  []Passage `json:"passages,omitempty"`
 }
 type QuestionInput struct {
 	AllowExternalSources bool            `json:"allow_external_sources,omitempty"`
@@ -368,6 +369,19 @@ type Answer struct {
 	Citations   map[string]Citation `json:"citations"`
 	Frames      []Frame             `json:"frames"`
 	Limitations []Limitation        `json:"limitations"`
+	Evidence    *AnswerEvidence     `json:"evidence,omitempty"`
+}
+
+// Server-owned provenance of this answer. Older answers have no delivery record.
+type AnswerEvidence struct {
+	TextSources    []AnswerTextSource `json:"text_sources"`
+	ViewedFrameIDs []string           `json:"viewed_frame_ids"`
+	Review         string             `json:"review"`
+}
+
+type AnswerTextSource struct {
+	CitationID string `json:"citation_id"`
+	Text       string `json:"text"`
 }
 type Conversation struct {
 	ID           string    `json:"id"`

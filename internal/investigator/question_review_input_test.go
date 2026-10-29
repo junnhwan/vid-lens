@@ -104,7 +104,7 @@ func assertQuestionReviewOriginals(t *testing.T, message *schema.Message, transc
 }
 
 func TestQuestionReviewEncodingPreservesFrozenVersionsAndCitationBindings(t *testing.T) {
-	for _, revision := range []string{domain.QuestionReadingV1, domain.QuestionReadingV2, domain.QuestionReadingV3} {
+	for _, revision := range []string{domain.QuestionReadingV1, domain.QuestionReadingV2, domain.QuestionReadingV3, domain.QuestionReadingV4} {
 		t.Run(revision, func(t *testing.T) {
 			s := &session{snapshot: domain.Snapshot{ID: "snapshot", DurationMS: 200}, turn: &domain.Turn{Question: "A focused question"}, cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: revision}}, transcript: []domain.Segment{
 				{ID: "one", StartMS: 0, EndMS: 100, Text: "原文\n\"quoted\" \\ </source> 😀", Origin: "asr"},
@@ -116,7 +116,7 @@ func TestQuestionReviewEncodingPreservesFrozenVersionsAndCitationBindings(t *tes
 				"f1":     {ID: "f1", Kind: "video_frame", FrameID: "actual-pixels", TimeMS: domain.Ptr(int64(125))},
 			}
 			source, payload := map[string]any{}, map[string]any{}
-			if revision == domain.QuestionReadingV3 {
+			if revision == domain.QuestionReadingV3 || revision == domain.QuestionReadingV4 {
 				passages := []sourcePassage{}
 				for i, segment := range s.transcript {
 					passages = append(passages, sourcePassage{Segment: segment, Alias: fmt.Sprint("t", i+1)})
@@ -134,7 +134,7 @@ func TestQuestionReviewEncodingPreservesFrozenVersionsAndCitationBindings(t *tes
 			if !reflect.DeepEqual(custom["originals"], []string{"t1", "t2"}) || custom["range"] != catalog["custom"].Range || custom["verbatim_quote"] != catalog["custom"].Quote {
 				t.Fatal("custom source binding was changed by compaction")
 			}
-			if revision == domain.QuestionReadingV3 {
+			if revision == domain.QuestionReadingV3 || revision == domain.QuestionReadingV4 {
 				assertQuestionReviewOriginals(t, schema.UserMessage(string(domain.JSON(source))), s.transcript, "t1", "t2")
 				if source["question"] != s.turn.Question || s.boundedReviewProtocol() == "evidence-review-2026-10-21-v12" {
 					t.Fatal("new review lost question scope or reused a historical review identity")

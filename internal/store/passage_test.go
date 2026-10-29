@@ -27,6 +27,7 @@ func TestCrossParagraphQuestionsValidatePersistReplayAndStayPrivate(t *testing.T
 	}
 	parts := []domain.Passage{{SectionID: "s1", BlockID: "a", Quote: "第一段。"}, {SectionID: "s1", BlockID: "b", Quote: second}, {SectionID: "s2", BlockID: "c", Quote: "第三"}}
 	for _, bad := range []domain.QuestionContext{
+		{SectionID: "foreign"},
 		{Passages: []domain.Passage{parts[0], {SectionID: "s1", BlockID: "b", Quote: "伪造文字"}}},
 		{Passages: []domain.Passage{parts[0], {SectionID: "other-article", BlockID: "b", Quote: second}}},
 		{Passages: []domain.Passage{parts[0], parts[0]}},
@@ -78,6 +79,38 @@ func TestCrossParagraphQuestionsValidatePersistReplayAndStayPrivate(t *testing.T
 	saved, err := s.Turn(ctx, other, public.ID, exampleTurn.ID)
 	if err != nil || len(saved.Context.Passages) != 3 {
 		t.Fatalf("public example lost cross-paragraph selection: %+v %v", saved.Context, err)
+	}
+}
+
+func TestChapterQuestionPersistsAndBindsIdempotency(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	owner := session(t, s)
+	r, claim := prepared(t, s, owner)
+	a := domain.Article{SnapshotID: *r.SnapshotID, Sections: []domain.Section{{ID: "first"}, {ID: "second"}}, Citations: map[string]domain.Citation{}, Limitations: []domain.Limitation{}}
+	if err := s.Publish(ctx, claim, a); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := s.EnsureConversation(ctx, owner, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := domain.QuestionInput{Question: "这一章的重点？", Context: domain.QuestionContext{SectionID: "first"}}
+	created, err := s.CreateTurn(ctx, owner, c.ID, "chapter", in, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Turn(ctx, owner, c.ID, created.ID)
+	if err != nil || saved.Context.SectionID != "first" {
+		t.Fatalf("chapter lost: %+v %v", saved.Context, err)
+	}
+	replay, err := s.CreateTurn(ctx, owner, c.ID, "chapter", in, "")
+	if err != nil || !replay.Replayed || replay.ID != created.ID {
+		t.Fatalf("replay: %+v %v", replay, err)
+	}
+	in.Context.SectionID = "second"
+	if _, err = s.CreateTurn(ctx, owner, c.ID, "chapter", in, ""); problemCode(err) != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("chapter escaped idempotency: %v", err)
 	}
 }
 

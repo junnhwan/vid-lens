@@ -299,6 +299,7 @@ export interface Passage {
 }
 
 export interface QuestionContext {
+	section_id?: string
   frame_id: string | null
   passage: Passage | null
   passages?: Passage[]
@@ -402,6 +403,7 @@ export interface ArticleResponse {
 export type DetailLevel = "concise" | "standard" | "detailed"
 
 export interface Answer {
+	evidence?: { text_sources: { citation_id: string; text: string }[]; viewed_frame_ids: string[]; review: string }
   kind: string
   summary: string
   blocks: Block[]

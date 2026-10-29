@@ -18,6 +18,7 @@ import { ReadingDialog } from "./ReadingDialog"
 import { ArticleGallery } from "./ArticleGallery"
 import { articleImages } from "./articleImages"
 import { useReadingLayout } from "./useReadingLayout"
+import type { PendingQuestion } from "../app/pendingQuestion"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -27,6 +28,8 @@ export function ReadView(props: {
   frames: Map<string, Frame>
   qaOpen: boolean
   turns: TurnView[]
+  pendingQuestion?: PendingQuestion | null
+  onRestoreQuestion?: () => void
   stepsFor: (turn: TurnView) => ActivityStep[]
   draft: string
   frameChip: { id: string; label: string } | null
@@ -362,6 +365,8 @@ export function ReadView(props: {
           <QaPanel
             open={props.qaOpen}
             turns={props.turns}
+            pendingQuestion={props.pendingQuestion}
+            onRestoreQuestion={props.onRestoreQuestion}
             stepsFor={props.stepsFor}
             frames={props.frames}
             draft={props.draft}

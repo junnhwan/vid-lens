@@ -27,6 +27,10 @@ export function starterPrompts(title: string | undefined, sectionTitle: string |
   return [main, second, "哪些说法可以直接回到画面核对？"]
 }
 
+export function starterSection(question: string, section: { id: string; title: string } | undefined): { section_id?: string } {
+  return section && question === starterPrompts(undefined, section.title)[1] ? { section_id: section.id } : {}
+}
+
 export function describeRequest(view: RequestView | null, current: ActivityStep | null, holding: boolean, reconnecting: boolean) {
   if (!view) {
     return { kicker: reconnecting ? "正在重新连接" : "正在连接", title: "正在读取进度", purpose: "", range: "", busy: true }

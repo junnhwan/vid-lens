@@ -156,7 +156,7 @@ func TestArticleLoopT14ReadingSSEExportsAndQAMatrix(t *testing.T) {
 		if frozen.ExecutionContract == nil || frozen.ExecutionContract.Version != domain.ExecutionContractV9 || frozen.ArticleLoop != nil {
 			t.Fatalf("QA contract changed due to article: %s", claim.Run.Checkpoint)
 		}
-		if frozen.ExecutionContract.InputRevision != domain.QuestionReadingV3 {
+		if frozen.ExecutionContract.InputRevision != domain.QuestionReadingV4 {
 			t.Fatal("new article QA did not freeze its compact reading input")
 		}
 		if err = s.engine.Run(ctx, *claim, s.profile); err != nil {
@@ -165,6 +165,9 @@ func TestArticleLoopT14ReadingSSEExportsAndQAMatrix(t *testing.T) {
 		result, err := s.engine.Store.TurnForRun(ctx, turn.RunID)
 		if err != nil || result.Answer == nil {
 			t.Fatalf("%s QA unreadable: %v", variant, err)
+		}
+		if result.Answer.Evidence == nil || result.Answer.Evidence.Review != "passed" || (len(result.Answer.Evidence.ViewedFrameIDs) > 0) != (variant == "image") {
+			t.Fatalf("%s QA lost actual image-delivery provenance: %+v", variant, result.Answer.Evidence)
 		}
 	}
 	if articleCalls.Load() != 2 || qaCalls.Load() != 3 {

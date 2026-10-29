@@ -24,9 +24,18 @@ describe("answer composition and navigation",()=>{
   it("groups scattered citations at the end of a paragraph",()=>{
     const cited: Answer={...answer,blocks:[{id:"c",type:"paragraph",origin:"video",content:[{type:"text",text:"先检查权限。"},{type:"citation",citation_id:"a"},{type:"text",text:"再看执行边界。"},{type:"citation",citation_id:"b"}]}],parts:undefined,citations:{a:{id:"a",kind:"video_text",label:"00:10",text_origin:"platform_subtitles",range:{start_ms:10000,end_ms:12000}},b:{id:"b",kind:"video_text",label:"00:40",text_origin:"platform_subtitles",range:{start_ms:40000,end_ms:42000}}}}
     const html=renderToStaticMarkup(<AnswerBody answer={cited} {...callbacks} />)
-    expect(html.indexOf("再看执行边界。")).toBeLessThan(html.search(/00:10.00:40/))
+    expect(html.indexOf("再看执行边界。")).toBeLessThan(html.indexOf("00:10 · 2处来源"))
     expect(html).toContain(">00:10<")
     expect(html).toContain(">00:40<")
+  })
+  it("shows server-recorded text and distinguishes unread images from article captions",()=>{
+    const supported: Answer = {...answer, evidence:{text_sources:[{citation_id:"a",text:"The original source sentence."}],viewed_frame_ids:[],review:"passed"},citations:{a:{id:"a",kind:"video_text",label:"原文",text_origin:"platform_subtitles",range:{start_ms:10000,end_ms:12000}}}}
+    const html = renderToStaticMarkup(<AnswerBody answer={supported} {...callbacks} />)
+    expect(html).toContain("依据 1 处视频原文")
+    expect(html).toContain("本轮未查看画面")
+    expect(html).toContain("The original source sentence.")
+    expect(html).toContain("打开原视频核对")
+    expect(renderToStaticMarkup(<AnswerBody answer={answer} {...callbacks} />)).not.toContain("本轮未查看画面")
   })
   it("provides independent chapter anchors and the current reading location",()=>{
     const html=renderToStaticMarkup(<ArticleOutline current="b" sections={[{id:"a",title:"原理",blocks:[]},{id:"b",title:"实践",blocks:[]}]} onJump={()=>undefined} />)

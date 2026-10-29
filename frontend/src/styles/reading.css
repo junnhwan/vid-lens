@@ -159,6 +159,20 @@ html:has(.reading-dialog[open]) { overflow: hidden; }
 .assistant-byline strong { font-size: 12px; font-weight: 600; color: var(--ink); }
 .assistant-byline > span { padding-left: 5px; color: var(--ink-soft); font-size: 10px; }
 .assistant-message .turn-activity { margin-bottom: 14px; }
+.question-message .question-delivery { margin: 8px 0 0; font: 400 12px/1.5 var(--sans); color: var(--ink-soft); }
+.assistant-message, .turn-activity, .pending-turn { min-width: 0; }
+.answer-evidence { margin: 0 0 18px; border-bottom: 1px solid var(--line); font-family: var(--sans); }
+.answer-evidence > summary { padding: 9px 0; color: var(--teal-ink); font-size: 12px; line-height: 1.7; cursor: pointer; }
+.answer-evidence > summary span { color: var(--ink-soft); }
+.answer-evidence-body { padding: 8px 12px 16px; background: var(--teal-soft); border-radius: 6px; margin-bottom: 12px; }
+.turn-answer .answer-evidence .evidence-note { font: 400 12px/1.7 var(--sans); color: var(--ink-soft); }
+.source-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.source-choices button { border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; font: 500 12px/1.5 var(--sans); background: transparent; color: var(--teal-ink); }
+.source-choices button[aria-pressed="true"] { border-color: var(--teal); background: var(--canvas); }
+.answer-evidence .source-original { margin: 12px 0; padding: 0 0 0 12px; border-left: 2px solid var(--teal); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 14px/1.75 var(--sans); }
+.answer-viewed-frames { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.answer-viewed-frames > button { display: grid; width: 128px; padding: 0; gap: 5px; border: 0; background: transparent; color: var(--ink-soft); text-align: left; font-size: 12px; }
+.answer-viewed-frames img { width: 100%; max-height: 88px; object-fit: contain; }
 .assistant-message .turn-summary { margin-top: 3px; font-size: 11px; font-weight: 400; color: var(--ink-soft); }
 .turn-answer { margin-top: 16px; }
 .turn-answer .answer-lead, .workspace[data-qa="stage"] .turn-answer .answer-lead { padding: 0 0 18px 14px; margin-bottom: 22px; border-left: 2px solid var(--teal); font: 500 17px/1.75 var(--serif); color: var(--ink); }

@@ -43,7 +43,11 @@ func (s *session) semanticQuestionReading() bool {
 }
 
 func (s *session) scopedQuestionReview() bool {
-	return s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV3
+	return s.questionReading() && (s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV3 || s.focusedQuestion())
+}
+
+func (s *session) focusedQuestion() bool {
+	return s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV4
 }
 
 func (s *session) indexedReview() bool {

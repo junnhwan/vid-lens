@@ -100,7 +100,16 @@ func (s *session) reviewArticle(ctx context.Context, a domain.Article) error {
 }
 
 func (s *session) reviewAnswer(ctx context.Context, a domain.Answer) error {
-	return s.reviewContent(ctx, map[string]any{"kind": a.Kind, "summary": a.Summary, "blocks": a.Blocks, "parts": a.Parts, "limitations": a.Limitations}, a.Citations)
+	return s.reviewContent(ctx, s.answerReviewCandidate(a), a.Citations)
+}
+
+func (s *session) answerReviewCandidate(a domain.Answer) map[string]any {
+	candidate := map[string]any{"kind": a.Kind, "summary": a.Summary, "blocks": a.Blocks, "parts": a.Parts, "limitations": a.Limitations}
+	if s.focusedQuestion() {
+		// kind is a routing enum, not an independently assessable video claim.
+		delete(candidate, "kind")
+	}
+	return candidate
 }
 
 func (s *session) reviewContent(ctx context.Context, candidate any, citations map[string]domain.Citation) error {

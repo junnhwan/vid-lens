@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.focusedQuestion() {
+		return "evidence-review-qa-2026-10-29-v2"
+	}
 	if s.scopedQuestionReview() {
 		return "evidence-review-qa-2026-10-29-v1"
 	}

@@ -23,6 +23,13 @@ type readingAnswerInput struct {
 	Limitations []domain.Limitation          `json:"limitations"`
 }
 
+const questionFocusInstructions = `
+本轮优先使用首轮已提供的transcript原文。columns/rows是无损表格，alias就是可引用的tN；完整文章和图注仍只作导航。section_id指定用户正在问的章节，选段范围以context为准。原文已经足以回答时，直接submit_answer，不再为确认相同内容调用read_source。
+普通“最关键的一点/主要讲什么/为什么”先给一句直接结论，通常只需1–2个短解释块、总计150–300字，每块选1–3个代表性来源。不把章节逐段复述，不附无必要的英文引语、固定结尾或额外背景；仅在用户要求详细、逐步、比较或列举时展开。
+“我尚未读取”与“视频没有提及”不同。缺证反馈先沿相应时间补读连续上下文，再修改必要字段；不要新增“字幕没有”的猜测性局限。不要重写已支持的事实，保持引用贴近主张。
+只有实际交付图片后才能陈述自己的视觉发现。字幕里的图表介绍用“讲者说/讲者介绍图表时指出”归因；涉及图表数字、图像布局、颜色、代码画面或操作前后细节时先inspect_video_window读取真实像素，并记录观察。普通概括题不为配图增加视觉调查。
+quote块只使用type="quote"、text和citation_ids，不另写quote字段；正文意译使用paragraph。`
+
 func answerReadingBlocks(input []domain.ArticleReadingBlock) ([]domain.Block, error) {
 	inline := func(text string, ids []string) []domain.Inline {
 		out := []domain.Inline{}
