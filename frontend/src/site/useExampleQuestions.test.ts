@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "../api/error"
 import { memoryStore } from "../api/writes"
 import type { PassageChoice } from "../contract/text"
+import type { TurnView } from "../contract/types"
 import { useExampleQuestions } from "./useExampleQuestions"
 
-const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn() }))
-vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn } }))
+const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), retryTurn: vi.fn() }))
+vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn; retryTurn = api.retryTurn } }))
 let view: ReturnType<typeof useExampleQuestions>
 let renderer: ReactTestRenderer | undefined
 function Questions() { view = useExampleQuestions("article", "文章", "章节", "chapter-id"); return null }
@@ -27,6 +28,28 @@ afterEach(async () => {
 })
 
 describe("public example passage questions", () => {
+  it("guards retries while accepting and ignores a late failure after leaving the example", async () => {
+    const failed: TurnView = {
+      schema_version: 1, execution: null, failure: null,
+      turn: { id: "failed", conversation_id: "conversation", request_id: "request", article_id: "article", snapshot_id: "snapshot", revision: 1, turn_no: 1, status: "failed", question: "问题", context: { frame_id: null, passage: null }, retry_of_id: null, answer: null, created_at: "", updated_at: "" },
+      actions: { can_retry: true, can_cancel: false, can_submit_next: true },
+      activity: { recent_steps: [], current_step_id: null, has_more: false, history_url: "", history_status: "none", history_expires_at: null },
+      stream: { cursor: "failed-1", revision: 1, run_id: "run", seq: 1 },
+    }
+    api.exampleConversation.mockResolvedValue({ conversation: { id: "conversation", article_id: "article", last_turn_id: "failed", active_turn_id: null } })
+    api.turns.mockResolvedValue({ items: [failed] })
+    let reject!: (reason: unknown) => void
+    api.retryTurn.mockReturnValue(new Promise((_resolve, fail) => { reject = fail }))
+    await act(async () => { renderer = create(createElement(Questions)) })
+    await act(async () => view.toggle())
+    await act(async () => { view.retry(failed); view.retry(failed) })
+    expect(api.retryTurn).toHaveBeenCalledTimes(1)
+    expect(view.busy).toBe(true)
+    await act(async () => renderer?.unmount())
+    await act(async () => reject(new Error("late failure")))
+    expect(view.error).toBe("")
+  })
+
   it("shows the pending question immediately, sends its chapter identity once, and keeps the next draft", async () => {
     let resolve!: (value: unknown) => void
     api.createTurn.mockReturnValue(new Promise(done => { resolve = done }))

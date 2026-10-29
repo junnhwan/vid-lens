@@ -98,6 +98,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		if s.focusedQuestion() {
 			instruction += questionFocusInstructions
 		}
+		if s.compactQuestionReview() {
+			instruction += "\n用户要看关键画面时，优先给出一处建议、简短理由和已查看的图；概括选图理由，不扩写无关幻灯片的布局或完整图谱。未经比较不要声称某页是全片唯一或其他图都不重要。图注描述实际可见信息，正文解释其意义，避免重复。"
+		}
 	} else if s.boundedSourceContext() {
 		instruction += "\n" + s.sourceInstructions()
 	}

@@ -27,6 +27,22 @@ const step = (id: string, kind: string, call: number, submission?: number, usage
 })
 
 describe("model token usage", () => {
+  it("keeps a successful single send in its main step without an empty details disclosure", () => {
+    const html = renderToStaticMarkup(<ActivityList steps={[
+      step("call", "model_response", 1, undefined, { input: 1200, output: 300 }),
+      step("send", "model_submission", 1, 1, { input: 1200, output: 300 }),
+    ]} open detailed resourceStatus="completed" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain("第 1 次模型调用")
+    expect(html).not.toContain("发送详情")
+    expect(html.match(/入 <b>1.2k<\/b>/g)).toHaveLength(1)
+  })
+
+  it("keeps the reason for a failed single send available", () => {
+    const failed = { ...step("send", "model_submission", 1, 1), status: "failed", outcome: { message: "模型响应为空。", evidence_status: "not_assessed" } }
+    const html = renderToStaticMarkup(<ActivityList steps={[step("call", "model_response", 1), failed]} open detailed resourceStatus="failed" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain("模型响应为空。")
+  })
+
   it("shows the call total and each physical send separately", () => {
     const steps = [
       step("call", "model_response", 1, undefined, { input: 21649, output: 3102 }),

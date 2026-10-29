@@ -22,6 +22,7 @@ type reviewBatchOutcome struct {
 	UnitIDs              []string          `json:"unit_ids"`
 	Report               *reviewUnitReport `json:"report,omitempty"`
 	IgnoredContextFields []string          `json:"ignored_context_fields,omitempty"`
+	ConservativeVerdicts []string          `json:"conservative_verdicts,omitempty"`
 }
 
 // Own planning, explicit coverage and resumable execution behind one entry.
@@ -57,10 +58,16 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 				if !s.repairsReviewCoverage() {
 					return nil, domain.Err(502, "REVIEW_COVERAGE_INCOMPLETE", "独立复核未完成所有必需单元；草稿和已完成审核记录已保留。")
 				}
-				issues = append(issues, map[string]any{"code": "review_not_assessed", "path": byID[result.UnitID].Path, "reason": "本单元尚未完成复核。这不是已证伪；先回读相应原文或实际图片，定位并补正引用及必要证据后重新提交。不能把未审当通过，也不能仅为绕过审核删掉必要主题。", "review_unit_id": result.UnitID, "verdict": result.Verdict})
+				if len(result.Issues) == 0 {
+					issues = append(issues, map[string]any{"code": "review_not_assessed", "path": byID[result.UnitID].Path, "reason": "本单元尚未完成复核。这不是已证伪；先回读相应原文或实际图片，定位并补正引用及必要证据后重新提交。不能把未审当通过，也不能仅为绕过审核删掉必要主题。", "review_unit_id": result.UnitID, "verdict": result.Verdict})
+				}
 			}
 			for _, issue := range result.Issues {
-				issues = append(issues, map[string]any{"code": "evidence_not_supported", "path": byID[result.UnitID].Path, "reason": issue.Reason, "claim": issue.Claim, "citation_ids": issue.CitationIDs, "review_unit_id": result.UnitID, "verdict": result.Verdict})
+				code := "evidence_not_supported"
+				if result.Verdict == "not_assessed" {
+					code = "review_not_assessed"
+				}
+				issues = append(issues, map[string]any{"code": code, "path": byID[result.UnitID].Path, "reason": issue.Reason, "claim": issue.Claim, "citation_ids": issue.CitationIDs, "review_unit_id": result.UnitID, "verdict": result.Verdict})
 			}
 		}
 		if !s.sweepsTextReview() && (task.Mode == "source_text" || s.repairsReviewCoverage()) && len(issues) > 0 {
@@ -182,6 +189,10 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 		if s.normalizesReviewEcho() {
 			response, ignored = projectReviewContextEcho(response, task, input)
 		}
+		var conservative []string
+		if s.compactQuestionReview() {
+			response, conservative = projectQuestionReviewVerdicts(response)
+		}
 		report, err := parseReviewUnits(response, id, task, catalog)
 		if err != nil {
 			formatErrors++
@@ -195,7 +206,7 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 			input = append(input, schema.UserMessage(string(domain.JSON(map[string]any{"review_format_error": message, "request_id": id, "required_unit_ids": ids, "instruction": "Return exactly one result for each required unit ID using the supplied tool schema."}))))
 			continue
 		}
-		out := reviewBatchOutcome{State: "complete", Mode: task.Mode, RequestID: id, UnitIDs: ids, Report: &report, IgnoredContextFields: ignored}
+		out := reviewBatchOutcome{State: "complete", Mode: task.Mode, RequestID: id, UnitIDs: ids, Report: &report, IgnoredContextFields: ignored, ConservativeVerdicts: conservative}
 		if err = s.engine.Store.FinishOperation(ctx, s.claim, key, out, "", nil); err != nil {
 			return nil, err
 		}
@@ -270,6 +281,9 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	}
 	if s.focusedQuestion() {
 		instructions += "\n本轮是聚焦问答，只核对会改变答案的实质事实。所给章节连续原文与引用邻居均为实际来源。未交付的内容用not_assessed反馈，不把未读当成原视频未提及；如原文支持讲者对图表的介绍，允许明确归因给讲者，不能声称亲眼看过未交付的画面。不要为一般概括要求额外调查或长篇论证。一次指出全部实质问题，每个问题给出最小可定位的断言和来源。"
+	}
+	if s.compactQuestionReview() {
+		instructions = questionEvidenceReviewInstructions + "\n" + reviewCitationBindingInstructions
 	}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")

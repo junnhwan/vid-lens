@@ -2,6 +2,7 @@ import { createElement } from "react"
 import { act, create, type ReactTestRenderer } from "react-test-renderer"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { memoryStore, rememberWrite } from "../api/writes"
+import { ApiError, NetworkError } from "../api/error"
 import type { Conversation, Frame, RequestView, TurnView } from "../contract/types"
 import { useVisitor } from "./useVisitor"
 
@@ -73,6 +74,66 @@ afterEach(async () => {
 })
 
 describe("visitor request ownership", () => {
+
+  it("reuses an uncertain retry key and clears the previous error when retrying again", async () => {
+    const failed = turn("A", "failed")
+    failed.actions.can_retry = true
+    api.conversation.mockResolvedValue({ conversation: { ...conversation("A"), last_turn_id: failed.turn.id } })
+    api.turns.mockResolvedValue({ items: [failed] })
+    api.retryTurn.mockRejectedValueOnce(new NetworkError())
+    const pending = deferred<{ body: TurnView }>()
+    api.retryTurn.mockReturnValueOnce(pending.promise)
+    await open("A")
+    await act(async () => view.toggleQa())
+    await act(async () => view.retryTurn(failed))
+    expect(view.qaError).not.toBe("")
+    await act(async () => view.retryTurn(failed))
+    expect(api.retryTurn.mock.calls[1][2]).toBe(api.retryTurn.mock.calls[0][2])
+    expect(view.qaError).toBe("")
+    expect(view.qaBusy).toBe(true)
+    await act(async () => pending.resolve({ body: turn("A") }))
+    expect(view.qaBusy).toBe(false)
+  })
+
+  it("reloads the current conversation after a retry conflict instead of leaving a refresh error", async () => {
+    const failed = turn("A", "failed")
+    failed.actions.can_retry = true
+    api.conversation.mockResolvedValue({ conversation: { ...conversation("A"), last_turn_id: failed.turn.id } })
+    api.turns.mockResolvedValue({ items: [failed] })
+    await open("A")
+    await act(async () => view.toggleQa())
+    const accepted = turn("A")
+    accepted.turn.id = "newer-turn"
+    accepted.turn.turn_no = 2
+    api.conversation.mockResolvedValue({ conversation: { ...conversation("A"), last_turn_id: accepted.turn.id } })
+    api.turns.mockResolvedValue({ items: [failed, accepted] })
+    api.retryTurn.mockRejectedValue(new ApiError({ status: 409, code: "TURN_HISTORY_CHANGED", detail: "对话已更新，请刷新后发送。" }))
+    await act(async () => view.retryTurn(failed))
+    expect(view.turns.at(-1)?.turn.id).toBe("newer-turn")
+    expect(view.qaError).toBe("")
+    expect(view.qaBusy).toBe(false)
+  })
+
+  it("submits a failed turn retry only once while it is being accepted", async () => {
+    const failed = turn("A", "failed")
+    failed.actions.can_retry = true
+    api.conversation.mockResolvedValue({ conversation: { ...conversation("A"), last_turn_id: failed.turn.id } })
+    api.turns.mockResolvedValue({ items: [failed] })
+    const pending = deferred<{ body: TurnView }>()
+    api.retryTurn.mockReturnValue(pending.promise)
+    await open("A")
+    await act(async () => view.toggleQa())
+    await act(async () => { view.retryTurn(failed); view.retryTurn(failed) })
+    expect(api.retryTurn).toHaveBeenCalledTimes(1)
+    expect(view.qaBusy).toBe(true)
+    const retried = turn("A", "running")
+    retried.turn.id = "retry-A"
+    retried.turn.turn_no = 2
+    await act(async () => pending.resolve({ body: retried }))
+    expect(view.qaBusy).toBe(false)
+    await act(async () => view.retryTurn(failed))
+    expect(api.retryTurn).toHaveBeenCalledTimes(1)
+  })
 
   it("moves a question out of the composer before the send returns and prevents duplicate sends", async () => {
     const pending = deferred<{ body: TurnView }>()

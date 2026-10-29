@@ -56,7 +56,7 @@ func TestAnswerReadingCheckedToolUsesTheDeclaredWire(t *testing.T) {
 }
 
 func TestAnswerReadingWireIsFrozenSeparatelyFromCanonicalQA(t *testing.T) {
-	for _, revision := range []string{"", domain.QuestionReadingV1, domain.QuestionReadingV2, domain.QuestionReadingV3, domain.QuestionReadingV4} {
+	for _, revision := range []string{"", domain.QuestionReadingV1, domain.QuestionReadingV2, domain.QuestionReadingV3, domain.QuestionReadingV4, domain.QuestionReadingV5} {
 		s := &session{turn: &domain.Turn{}, cp: checkpoint{HarnessRevision: 16, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9, InputRevision: revision}}}
 		if _, err := s.makeTools(); err != nil {
 			t.Fatal(err)

@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.compactQuestionReview() {
+		return "evidence-review-qa-2026-10-29-v3"
+	}
 	if s.focusedQuestion() {
 		return "evidence-review-qa-2026-10-29-v2"
 	}
@@ -64,6 +67,11 @@ func (s *session) boundedReviewProtocol() string {
 }
 
 func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
+	if s.compactQuestionReview() {
+		if task, ok := compactQuestionReviewTask(units, s.profile.MaxOutputTokens); ok {
+			return []reviewTask{task}, nil
+		}
+	}
 	if s.usesJointReview() {
 		return planReviewTasksWithPolicy(units, s.profile.MaxOutputTokens, true, 3, true)
 	}
@@ -345,10 +353,13 @@ func validateReviewUnits(out reviewUnitReport, id string, task reviewTask, catal
 			return errors.New("review issues are missing or unbounded")
 		}
 		switch result.Verdict {
-		case "supported", "not_assessed":
+		case "supported":
 			if len(result.Issues) != 0 {
 				return errors.New("review verdict conflicts with issues")
 			}
+		case "not_assessed":
+			// Evidence gaps may carry actionable reasons. They remain incomplete
+			// and every attached claim/source must pass the same strict checks.
 		case "contradicted", "unverifiable":
 			if len(result.Issues) == 0 {
 				return errors.New("material review finding needs evidence")

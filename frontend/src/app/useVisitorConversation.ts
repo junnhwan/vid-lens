@@ -427,17 +427,34 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
         void (async () => {
           const rt = context.runtime()
           const current = conversationRef.current
-          if (!rt || !current) return
+          if (!rt || !current || sending.current || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
           const gen = workspace.epoch
           const id = current.request_id
+          const slot = `turn-retry:${current.id}:${turn.turn.id}`
+          const body = JSON.stringify({ expected_last_turn_id: current.last_turn_id })
+          sending.current = true
+          setQaBusy(true)
+          setQaError("")
           try {
-            const accepted = await rt.api.retryTurn(current.id, turn.turn.id, newIdempotencyKey(), current.last_turn_id)
+            const pending = pendingWrite(store(), slot)
+            const key = pending && pending.body === body && canReplay(pending, Date.now()) ? pending.key : newIdempotencyKey()
+            rememberWrite(store(), { slot, key, path: `/api/v1/conversations/${current.id}/turns/${turn.turn.id}/retry`, body, startedAt: Date.now(), expiresAt: Date.now() + (context.session()?.capabilities.idempotency_window_seconds ?? 86400) * 1000 })
+            const accepted = await rt.api.retryTurn(current.id, turn.turn.id, key, current.last_turn_id)
+            if (pendingWrite(store(), slot)?.key === key) forgetWrite(store(), slot)
             if (!ownsRequest(gen, id) || conversationRef.current?.id !== current.id) return
             turnClock.current = clockFrom(accepted.body.stream)
             installTurn(accepted.body, true)
           } catch (error) {
             if (!ownsRequest(gen, id)) return
-            await report(error, setQaError)
+            if (isApiError(error) && (error.code === "TURN_IN_PROGRESS" || error.code === "TURN_HISTORY_CHANGED")) {
+              forgetWrite(store(), slot)
+              try { await ensureConversation(true); if (ownsRequest(gen, id)) setLive("已同步最新对话。") }
+              catch (again) { if (ownsRequest(gen, id)) await report(again, setQaError) }
+              return
+            }
+            await report(error, setQaError, slot)
+          } finally {
+            if (ownsRequest(gen, id)) { sending.current = false; setQaBusy(false) }
           }
         })(),
       suggest: (prompt?: string) => {

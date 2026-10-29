@@ -133,7 +133,7 @@ export function ActivityList({
             <span className="sr-only">{statusText(view.status)}</span>
           </div>
           {transcribed && view.status === "active" ? <div className="step-range">视频 {transcribed.done} / {transcribed.total}</div> : null}
-          {model && sends.length ? (
+          {model && (sends.length > 1 || sends.some(send => send.status === "failed" || send.status === "unknown")) ? (
             <details className="model-sends">
               <summary>
                 <span className="journal-disclosure-dot" aria-hidden="true" />
@@ -175,7 +175,7 @@ export function ActivityList({
               </ol>
             </details>
           ) : null}
-          {(detailed || model || step.kind === "retry" || step.kind === "reuse" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
+          {(!model || view.status !== "done") && (detailed || model || step.kind === "retry" || step.kind === "reuse" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
           {observations.length > 1 ? (
             <details className="observation-details">
               <summary>

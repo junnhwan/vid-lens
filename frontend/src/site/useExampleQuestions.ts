@@ -292,14 +292,37 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     },
     retry: (turn: TurnView) => {
       const current = conversationRef.current
-      if (!current) return
+      if (!current || sending.current || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
       const epoch = generation.current
-      void api().retryTurn(current.id, turn.turn.id, newIdempotencyKey(), current.last_turn_id).then((accepted) => {
+      const slot = `example-turn-retry:${current.id}:${turn.turn.id}`
+      const body = JSON.stringify({ expected_last_turn_id: current.last_turn_id })
+      const pending = pendingWrite(browserStore(), slot)
+      const key = pending && pending.body === body && canReplay(pending, Date.now()) ? pending.key : newIdempotencyKey()
+      sending.current = true
+      setBusy(true)
+      setError("")
+      void Promise.resolve().then(() => {
+        rememberWrite(browserStore(), { slot, key, path: `/api/v1/conversations/${current.id}/turns/${turn.turn.id}/retry`, body, startedAt: Date.now(), expiresAt: Date.now() + (sessionRef.current?.capabilities.idempotency_window_seconds ?? 86400) * 1000 })
+        return api().retryTurn(current.id, turn.turn.id, key, current.last_turn_id)
+      }).then((accepted) => {
+        if (pendingWrite(browserStore(), slot)?.key === key) forgetWrite(browserStore(), slot)
         if (epoch !== generation.current) return
         clockRef.current = clockFrom(accepted.body.stream)
         installTurn(accepted.body, true)
         startStream(accepted.body, epoch)
-      }).catch((cause: unknown) => setError(errorText(cause)))
+      }).catch(async (cause: unknown) => {
+        if (epoch !== generation.current) return
+        if (isApiError(cause) && (cause.code === "TURN_IN_PROGRESS" || cause.code === "TURN_HISTORY_CHANGED")) {
+          forgetWrite(browserStore(), slot)
+          try { await ensureConversation(current.article_id, epoch, true) }
+          catch (again) { if (epoch === generation.current) setError(errorText(again)) }
+          return
+        }
+        if (isApiError(cause) && cause.status < 500 && cause.status !== 429) forgetWrite(browserStore(), slot)
+        setError(errorText(cause))
+      }).finally(() => {
+        if (epoch === generation.current) { sending.current = false; setBusy(false) }
+      })
     },
     send: () => {
       if (sending.current) return

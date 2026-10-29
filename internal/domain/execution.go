@@ -93,6 +93,7 @@ const QuestionReadingV1 = "qa-article-reading-2026-10-22-v1"
 const QuestionReadingV2 = "qa-article-reading-2026-10-22-v2"
 const QuestionReadingV3 = "qa-article-reading-2026-10-29-v3"
 const QuestionReadingV4 = "qa-article-reading-2026-10-29-v4"
+const QuestionReadingV5 = "qa-article-reading-2026-10-29-v5"
 
 func QuestionReadingContract(version string) bool {
 	return version == QuestionReadingV1 || QuestionSemanticReadingContract(version)
@@ -101,14 +102,15 @@ func QuestionReadingContract(version string) bool {
 // V3 retains V2's answer, source-history and pixel delivery contracts. Only the
 // independent review's evidence selection changes: cited passages and neighbors
 // remain complete. V4 preloads a bounded question window for both author and
-// reviewer and records server-owned answer provenance. Older inputs stay frozen.
+// reviewer and records server-owned answer provenance. V5 combines small reviews
+// and conservatively admits actionable feedback. Older inputs stay frozen.
 func QuestionSemanticReadingContract(version string) bool {
-	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4
+	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4 || version == QuestionReadingV5
 }
 
 func QuestionInputRevision(articleVersion string) string {
 	if articleVersion == ArticleLoopV2 {
-		return QuestionReadingV4
+		return QuestionReadingV5
 	}
 	return ""
 }

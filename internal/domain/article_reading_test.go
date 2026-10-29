@@ -27,7 +27,7 @@ func TestArticleReadingPreservesContentAndIdentityWithoutCitationMetadata(t *tes
 	if strings.Contains(raw, "metadata-must-not-repeat") {
 		t.Fatal("reading view retained repeated citation metadata")
 	}
-	if QuestionInputRevision(ArticleLoopV2) != QuestionReadingV4 || QuestionInputRevision(ArticleLoopV1) != "" || QuestionInputRevision(ExecutionContractV12) != "" {
+	if QuestionInputRevision(ArticleLoopV2) != QuestionReadingV5 || QuestionInputRevision(ArticleLoopV1) != "" || QuestionInputRevision(ExecutionContractV12) != "" {
 		t.Fatal("historical question input was upgraded")
 	}
 }

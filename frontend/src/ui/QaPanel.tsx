@@ -257,9 +257,9 @@ export function QaPanel({
                   {turn.failure?.diagnostic_id ? <small className="meta">错误编号：{turn.failure.diagnostic_id}</small> : null}
                 </div>
               ) : null}
-              {turn.actions.can_retry ? (
-                <button type="button" className="disclosure" onClick={() => onRetry(turn)}>
-                  重新回答
+              {turn.actions.can_retry && turn.turn.id === turns.at(-1)?.turn.id && !active ? (
+                <button type="button" className="disclosure" disabled={busy} aria-busy={busy} onClick={() => { nearBottom.current = true; setNewAnswer(false); onRetry(turn) }}>
+                  {busy ? "正在提交…" : "重新回答"}
                 </button>
               ) : null}
               </div>
