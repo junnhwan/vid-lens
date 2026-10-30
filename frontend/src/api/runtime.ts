@@ -6,6 +6,7 @@ import type {
   ActivityPage,
   ArticleResponse,
   ConversationResponse,
+  ConversationPage,
   Frame,
   RequestView,
   SessionResponse,
@@ -23,6 +24,9 @@ export interface VisitorApi {
   frame(requestId: string, frameId: string): Promise<Frame>
   activity(url: string, before?: string | null): Promise<ActivityPage>
   conversation(requestId: string): Promise<ConversationResponse>
+  getConversation(id: string): Promise<ConversationResponse>
+  conversations(requestId: string, before?: string | null): Promise<ConversationPage>
+  createConversation(requestId: string, key: string): Promise<Accepted<ConversationResponse>>
   turns(conversationId: string, beforeTurnNo?: number | null): Promise<TurnPage>
   createTurn(conversationId: string, key: string, body: unknown): Promise<Accepted<TurnView>>
   getTurn(conversationId: string, turnId: string): Promise<TurnView>

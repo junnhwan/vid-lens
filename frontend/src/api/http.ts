@@ -7,6 +7,7 @@ import type {
   ActivityPage,
   ArticleResponse,
   ConversationResponse,
+  ConversationPage,
   Frame,
   Problem,
   RequestView,
@@ -174,6 +175,19 @@ export class HttpApi {
     return this.request<ConversationResponse>("POST", `/api/v1/requests/${encodeURIComponent(requestId)}/conversation`, {}).then(
       (result) => result.body,
     )
+  }
+
+  getConversation(id: string) {
+    return this.request<ConversationResponse>("GET", `/api/v1/conversations/${encodeURIComponent(id)}`).then(result => result.body)
+  }
+
+  conversations(requestId: string, before?: string | null) {
+    const query = before ? `?before=${encodeURIComponent(before)}` : ""
+    return this.request<ConversationPage>("GET", `/api/v1/requests/${encodeURIComponent(requestId)}/conversations${query}`).then(result => result.body)
+  }
+
+  createConversation(requestId: string, key: string) {
+    return this.request<ConversationResponse>("POST", `/api/v1/requests/${encodeURIComponent(requestId)}/conversations`, {}, key).then(result => this.accepted(result))
   }
 
   exampleConversation(articleId: string) {

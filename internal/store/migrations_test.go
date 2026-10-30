@@ -78,8 +78,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 29 {
-		t.Fatalf("expected 29 registered migrations, got %v", versions)
+	if len(versions) != 30 {
+		t.Fatalf("expected 30 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -89,7 +89,7 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 }
 
 func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
-	for _, version := range []int{18, 19, 20, 21} {
+	for _, version := range []int{18, 19, 20, 21, 29} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			s := testStore(t)
 			ctx := context.Background()
@@ -166,6 +166,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if version < 30 {
+				if _, err := s.Pool.Exec(ctx, "DROP INDEX qa_conversations_owner_video_order; ALTER TABLE qa_conversations ADD CONSTRAINT qa_conversations_session_id_request_id_key UNIQUE(session_id,request_id)"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := s.Pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version>$1", version); err != nil {
 				t.Fatal(err)
 			}
@@ -186,8 +191,10 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 			}
 			afterID, afterProfile, err := s.CurrentConfig(ctx)
 			expectedProfile := profile
-			expectedProfile.MaxVideoMS = 120 * 60 * 1000
-			if err != nil || configID == afterID || string(domain.JSON(expectedProfile)) != string(domain.JSON(afterProfile)) || article != afterArticle || applied != afterApplied {
+			if version < 27 {
+				expectedProfile.MaxVideoMS = 120 * 60 * 1000
+			}
+			if err != nil || (configID != afterID) != (version < 27) || string(domain.JSON(expectedProfile)) != string(domain.JSON(afterProfile)) || article != afterArticle || applied != afterApplied {
 				t.Fatalf("migration did not preserve the old snapshot while advancing current intake limits: %v", err)
 			}
 		})

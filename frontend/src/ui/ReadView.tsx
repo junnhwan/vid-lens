@@ -19,6 +19,8 @@ import { ArticleGallery } from "./ArticleGallery"
 import { articleImages } from "./articleImages"
 import { useReadingLayout } from "./useReadingLayout"
 import type { PendingQuestion } from "../app/pendingQuestion"
+import type { Conversation } from "../contract/types"
+import type { ConversationHistoryControls } from "../app/useConversationHistory"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -28,6 +30,8 @@ export function ReadView(props: {
   frames: Map<string, Frame>
   qaOpen: boolean
   turns: TurnView[]
+  currentConversation?: Conversation | null
+  conversationHistory?: ConversationHistoryControls
   pendingQuestion?: PendingQuestion | null
   onRestoreQuestion?: () => void
   stepsFor: (turn: TurnView) => ActivityStep[]
@@ -365,6 +369,8 @@ export function ReadView(props: {
           <QaPanel
             open={props.qaOpen}
             turns={props.turns}
+            currentConversation={props.currentConversation}
+            conversationHistory={props.conversationHistory}
             pendingQuestion={props.pendingQuestion}
             onRestoreQuestion={props.onRestoreQuestion}
             stepsFor={props.stepsFor}

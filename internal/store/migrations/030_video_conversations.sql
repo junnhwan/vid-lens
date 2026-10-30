@@ -1,0 +1,2 @@
+ALTER TABLE qa_conversations DROP CONSTRAINT qa_conversations_session_id_request_id_key;
+CREATE INDEX qa_conversations_owner_video_order ON qa_conversations(session_id,request_id,created_at DESC,id DESC);

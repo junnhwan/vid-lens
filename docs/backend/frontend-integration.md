@@ -10,7 +10,7 @@ Serve the frontend and API through the same browser origin. The Vite development
 2. `POST /requests` with `{video_url}` and optional model, purpose and detail fields, plus `X-CSRF-Token` and a newly generated `Idempotency-Key`. Persist `request.id` in the page URL. HTTP 201 means accepted, not completed.
 3. Install the entire returned RequestView; subscribe to its stable `stream.url?after=<cursor>`. Prepare/generation run changes are server-owned.
 4. Once `request.status=completed`, close SSE and GET `/requests/{id}/article`. Render typed blocks, citations and returned Frame URLs. The article is immutable. A held-open image/history view is local frontend state.
-5. Ensure `/requests/{id}/conversation` when opening Q&A. Read turn history and use the accepted tail ID for `expected_last_turn_id`. Each new question/retry gets its own action key.
+5. On first opening Q&A, ensure `/requests/{id}/conversation` or restore the selected owned conversation. Read turn history and use that conversation's accepted tail ID for `expected_last_turn_id`. Each new question/retry gets its own action key.
 
 All mutating visitor requests require Origin and CSRF. Private resource reads require the anonymous cookie; public model catalogs and site statistics do not. A failed resource is still HTTP GET 200 with `failure`; Problems describe rejected HTTP operations. On 401, stop subscriptions and show session loss. Do not automatically create a new session and replay uncertain writes.
 
@@ -63,3 +63,11 @@ On CLOSED/network errors, GET the resource and reconstruct a new EventSource wit
 ## Minimal desktop acceptance
 
 Check initial session creation, create/replay/conflict, refresh during preparation, switch to generation, actual frame display/zoom, immutable article reading, frame/passage questions, double-tab turn conflict, cancel/retry, SSE reconnect/reset, expired image behavior and media restoration. Preserve the reader's scroll/focus while status changes. The product targets desktop Web.
+
+## Multiple conversations within one video
+
+`GET /api/v1/requests/{request}/conversations` lists only the current visitor's conversations for that reading record. Items retain the conversation metadata and add `title` (the first available question, capped at 48 characters), `updated_at` and `turn_count`. `has_more` / `next_before` paginate in stable creation order; pass the owned cursor as `before`. `POST` to the same URL with `{}` and a fresh idempotency key creates an empty thread. A network replay retains that action key; successful replay returns the original conversation and starts no question or model work. `GET /api/v1/conversations/{conversation}` refreshes the selected thread metadata. The existing singular ensure route opens the newest thread for compatible clients.
+
+Persist the selected identity per video in the visitor's local store, validate it against the current request/article, and recover an inaccessible selection through the owned video endpoint. Thread activation stops the previous client stream, restores that thread's in-page composer draft and reads its turns; it never cancels server work. Stale snapshots, activity and history reads cannot replace the newly selected thread. Preserve uncertain question writes and use separate idempotent creation slots. History titles and messages must be rendered as text. No other visitor's conversation metadata is returned.
+
+Model history remains `PriorTurns` from the same conversation only. Example conversations share the per-example question allowance across threads. Original-source validation, per-thread ordering, active-turn exclusion and existing server admission limits continue to apply.

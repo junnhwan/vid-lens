@@ -10,6 +10,7 @@ import type { ActivityStep, Conversation, Frame, SessionResponse, TurnView } fro
 import { starterPrompts, starterSection } from "../app/labels"
 import type { PendingQuestion } from "../app/pendingQuestion"
 import { errorText, normalizeStep } from "../app/visitorContract"
+import { conversationWithTurns, useConversationHistory } from "../app/useConversationHistory"
 
 function browserStore(): KeyValue {
   return localStorage
@@ -42,9 +43,43 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   const [error, setError] = useState("")
   const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({})
   const [focusToken, setFocusToken] = useState(0)
+  const composers = useRef(new Map<string, ReturnType<typeof captureComposer>>())
   conversationRef.current = conversation
   turnsRef.current = turns
   stepsRef.current = turnSteps
+  const history = useConversationHistory({
+    scope: `example:${articleID ?? ""}`, api, store: browserStore, current: () => conversationRef.current,
+    disabled: () => sending.current,
+    windowSeconds: () => sessionRef.current?.capabilities.idempotency_window_seconds ?? 86400,
+    activate: activateConversation,
+  })
+  function captureComposer() { return { draft, frameChip, passageChip, externalAllowed, referenceLinks, pendingQuestion, restore: restoreSend.current } }
+  function restoreComposer(id: string) {
+    const saved = composers.current.get(id)
+    setDraft(saved?.draft ?? ""); setFrameChip(saved?.frameChip ?? null); setPassageChip(saved?.passageChip ?? null)
+    setExternalAllowed(saved?.externalAllowed ?? false); setReferenceLinks(saved?.referenceLinks ?? "")
+    setPendingQuestion(saved?.pendingQuestion ?? null); restoreSend.current = saved?.restore ?? null
+  }
+  async function activateConversation(next: Conversation, owns: () => boolean) {
+    const current = conversationRef.current
+    if (current) composers.current.set(current.id, captureComposer())
+    const epoch = ++generation.current
+    stopStream(); clockRef.current = null; conversationLoad.current = null
+    conversationRef.current = next; setConversation(next); restoreComposer(next.id)
+    setTurns([]); turnsRef.current = []; setExpanded({}); setError("")
+    const page = await api().turns(next.id)
+    if (!owns() || epoch !== generation.current) return
+    if (page.items.some(item => item.turn.conversation_id !== next.id)) throw new Error("这条会话的问答记录不一致。")
+    const loadedConversation = conversationWithTurns(next, page.items)
+    conversationRef.current = loadedConversation; setConversation(loadedConversation)
+    setTurns(page.items); turnsRef.current = page.items
+    const loaded = Object.fromEntries(page.items.map(item => [item.turn.id, asSteps(item.activity.recent_steps).map(normalizeStep)]))
+    stepsRef.current = loaded; setTurnSteps(loaded)
+    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
+    const active = page.items.find(item => !isTerminalStatus(item.turn.status))
+    if (active) startStream(active, epoch)
+    setFocusToken(value => value + 1)
+  }
 
   function api() {
     if (!apiRef.current) apiRef.current = new HttpApi()
@@ -162,12 +197,22 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     if (epoch !== generation.current) return null
     const current = conversationRef.current
     if (!force && current?.article_id === id) return current
-    const response = await api().exampleConversation(id)
+    const preferred = current?.article_id === id ? current.id : history.preferredID()
+    let response
+    try { response = preferred ? await api().getConversation(preferred) : await api().exampleConversation(id) }
+    catch (cause) {
+      if (!preferred || !isApiError(cause) || cause.status !== 404) throw cause
+      history.forgetSelection(); response = await api().exampleConversation(id)
+    }
     if (epoch !== generation.current || response.conversation.article_id !== id) return null
     conversationRef.current = response.conversation
     setConversation(response.conversation)
+    history.remember(response.conversation)
     const page = await api().turns(response.conversation.id)
     if (epoch !== generation.current || conversationRef.current?.id !== response.conversation.id) return null
+    if (page.items.some(item => item.turn.conversation_id !== response.conversation.id)) throw new Error("这条会话的问答记录不一致。")
+    const loadedConversation = conversationWithTurns(response.conversation, page.items)
+    conversationRef.current = loadedConversation; setConversation(loadedConversation)
     setTurns(page.items)
     turnsRef.current = page.items
     const loaded: Record<string, ActivityStep[]> = {}
@@ -179,7 +224,8 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     setTurnSteps(loaded)
     const active = [...page.items].reverse().find((turn) => !isTerminalStatus(turn.turn.status))
     if (active) startStream(active, epoch)
-    return response.conversation
+    void history.refresh(false, response.conversation.request_id)
+    return loadedConversation
   }
   async function ensureConversation(id: string, epoch: number, force = false): Promise<Conversation | null> {
     if (conversationLoad.current?.epoch === epoch) return conversationLoad.current.promise
@@ -190,6 +236,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
 
   useEffect(() => {
     generation.current += 1
+    history.reset(); composers.current.clear()
     stopStream()
     conversationRef.current = null
     turnsRef.current = []
@@ -221,13 +268,15 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   return {
     open,
     turns,
+    currentConversation: conversation,
+    conversationHistory: history.controls,
     frames,
     stepsFor: (turn: TurnView) => turnSteps[turn.turn.id] ?? [],
     draft,
     frameChip,
     passageChip,
     prompts: starterPrompts(title, sectionTitle),
-    busy,
+    busy: busy || history.controls.busy,
     pendingQuestion,
     restoreQuestion: () => { if (pendingQuestion?.phase === "failed") { restoreSend.current?.(); setPendingQuestion(null); setFocusToken(value => value + 1) } },
     error,
@@ -292,7 +341,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     },
     retry: (turn: TurnView) => {
       const current = conversationRef.current
-      if (!current || sending.current || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
+      if (!current || sending.current || history.isBusy() || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
       const epoch = generation.current
       const slot = `example-turn-retry:${current.id}:${turn.turn.id}`
       const body = JSON.stringify({ expected_last_turn_id: current.last_turn_id })
@@ -325,7 +374,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
       })
     },
     send: () => {
-      if (sending.current) return
+      if (sending.current || history.isBusy()) return
       const text = draft.trim()
       if (!text || !articleID) {
         setError("先写下一个问题。")

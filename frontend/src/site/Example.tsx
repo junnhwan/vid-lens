@@ -264,6 +264,8 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
       <QaPanel
         open={questions.open}
         turns={questions.turns}
+        currentConversation={questions.currentConversation}
+        conversationHistory={questions.conversationHistory}
         pendingQuestion={questions.pendingQuestion}
         onRestoreQuestion={questions.restoreQuestion}
         stepsFor={questions.stepsFor}

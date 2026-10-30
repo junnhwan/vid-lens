@@ -456,6 +456,19 @@ export interface ConversationResponse {
   conversation: Conversation
 }
 
+export interface ConversationSummary extends Conversation {
+  title: string
+  updated_at: string
+  turn_count: number
+}
+
+export interface ConversationPage {
+  schema_version: number
+  items: ConversationSummary[]
+  has_more: boolean
+  next_before: string | null
+}
+
 export interface ActivityPage {
   schema_version: number
   items: ActivityStep[]

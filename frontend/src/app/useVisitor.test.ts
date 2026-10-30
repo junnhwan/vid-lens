@@ -9,6 +9,7 @@ import { useVisitor } from "./useVisitor"
 const api = vi.hoisted(() => ({
   session: vi.fn(), getRequest: vi.fn(), createRequest: vi.fn(), cancelRequest: vi.fn(), retryRequest: vi.fn(),
   conversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), cancelTurn: vi.fn(), retryTurn: vi.fn(),
+  getConversation: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
   frame: vi.fn(), article: vi.fn(), models: vi.fn(), activity: vi.fn(), closeEvents: vi.fn(),
 }))
 vi.mock("../api/runtime", () => ({
@@ -65,6 +66,8 @@ beforeEach(() => {
   api.session.mockResolvedValue({ schema_version: 1, csrf_token: "test", capabilities: {} })
   api.getRequest.mockImplementation(async (id: string) => request(id))
   api.conversation.mockImplementation(async (id: string) => ({ conversation: conversation(id) }))
+  api.getConversation.mockImplementation(async (id: string) => api.conversation(id.replace(/^conversation-/, "")))
+  api.conversations.mockResolvedValue({items:[],has_more:false,next_before:null})
   api.turns.mockResolvedValue({ items: [] })
 })
 afterEach(async () => {
@@ -74,6 +77,70 @@ afterEach(async () => {
 })
 
 describe("visitor request ownership", () => {
+
+  it("replays an uncertain conversation creation key instead of creating another thread", async () => {
+    const second={...conversation("A"),id:"second-A"}
+    api.createConversation.mockRejectedValueOnce(new NetworkError()).mockResolvedValueOnce({body:{conversation:second}})
+    await open("A"); await act(async()=>view.toggleQa())
+    await act(async()=>view.conversationHistory.create())
+    expect(view.conversationHistory.error).not.toBe("")
+    await act(async()=>view.conversationHistory.create())
+    expect(api.createConversation.mock.calls[0][1]).toBe(api.createConversation.mock.calls[1][1])
+    expect(view.currentConversation?.id).toBe(second.id)
+    expect(view.conversationHistory.error).toBe("")
+  })
+
+  it("uses the fresh turn tail when another tab submitted after the metadata read", async()=>{
+    const fresh=turn("A")
+    api.turns.mockResolvedValue({items:[fresh]})
+    await open("A");await act(async()=>view.toggleQa())
+    expect(view.currentConversation?.last_turn_id).toBe(fresh.turn.id)
+    const pending=deferred<{body:TurnView}>();api.createTurn.mockReturnValue(pending.promise)
+    await act(async()=>view.setDraft("跟进问题"));await act(async()=>view.send())
+    expect(api.createTurn.mock.calls[0][2].expected_last_turn_id).toBe(fresh.turn.id)
+    await act(async()=>pending.resolve({body:fresh}))
+  })
+
+  it("creates an independent conversation once, restores each draft, and keeps the selection after returning", async () => {
+    const first = conversation("A"), second = {...conversation("A"), id:"second-A"}
+    api.getConversation.mockImplementation(async id => ({conversation: id === second.id ? second : first}))
+    api.turns.mockImplementation(async id => ({items:id === first.id ? [turn("A")] : []}))
+    const pending = deferred<{body:{conversation:Conversation}}>()
+    api.createConversation.mockReturnValue(pending.promise)
+    await open("A")
+    await act(async () => view.toggleQa())
+    await act(async () => view.setDraft("旧会话的草稿"))
+    await act(async () => {view.conversationHistory.create(); view.conversationHistory.create()})
+    expect(api.createConversation).toHaveBeenCalledTimes(1)
+    await act(async () => pending.resolve({body:{conversation:second}}))
+    expect(view.currentConversation?.id).toBe(second.id)
+    expect(view.turns).toEqual([])
+    expect(view.draft).toBe("")
+    await act(async () => view.setDraft("新会话的草稿"))
+    await act(async () => view.conversationHistory.select(first.id))
+    expect(view.draft).toBe("旧会话的草稿")
+    expect(view.turns[0].turn.id).toBe("turn-A")
+    await act(async () => view.conversationHistory.select(second.id))
+    expect(view.draft).toBe("新会话的草稿")
+    await open("B"); await open("A")
+    await act(async () => view.toggleQa())
+    expect(view.currentConversation?.id).toBe(second.id)
+    expect(api.getConversation).toHaveBeenCalledWith(second.id)
+  })
+
+  it("ignores an earlier history read after switching to a new conversation", async () => {
+    const stale = deferred<{items:TurnView[]}>()
+    api.turns.mockReturnValueOnce(stale.promise).mockResolvedValue({items:[]})
+    const second = {...conversation("A"),id:"second-A"}
+    api.createConversation.mockResolvedValue({body:{conversation:second}})
+    await open("A")
+    await act(async () => view.toggleQa())
+    await act(async () => view.conversationHistory.create())
+    await act(async () => stale.resolve({items:[turn("A")]}))
+    expect(view.currentConversation?.id).toBe(second.id)
+    expect(view.turns).toEqual([])
+    expect(view.qaError).toBe("")
+  })
 
   it("reuses an uncertain retry key and clears the previous error when retrying again", async () => {
     const failed = turn("A", "failed")

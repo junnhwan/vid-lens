@@ -592,7 +592,7 @@ func (s *Store) OpenExampleConversation(ctx context.Context, session, articleID 
 		if err != nil {
 			return err
 		}
-		found, err := one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE session_id=$1 AND request_id=$2", session, requestID)
+		found, err := one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE session_id=$1 AND request_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1", session, requestID)
 		if err == nil {
 			out = found
 			return nil

@@ -213,3 +213,17 @@ html:has(.reading-dialog[open]) { overflow: hidden; }
 .turn-answer[data-arrive="true"] .answer-lead { animation: quiet-in 220ms var(--ease-out) both; }
 .turn-answer[data-arrive="true"] .answer-content { animation: quiet-in 260ms var(--ease-out) 90ms both; }
 .turn-q { text-wrap: pretty; }
+
+.qa-thread-bar { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 0; padding: 10px 0 12px; border-bottom: 1px solid var(--line); }
+.qa-thread-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 12px; }
+.qa-thread-action { flex-shrink: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink-soft); font: inherit; font-size: 12px; cursor: pointer; }
+.qa-thread-action:hover:not(:disabled), .qa-thread-item:hover:not(:disabled) { background: var(--surface); color: var(--ink); }
+.qa-thread-action:disabled, .qa-thread-item:disabled { opacity: .5; cursor: default; }
+.qa-thread-history { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; left: 0; max-height: min(360px, 45vh); overflow: auto; overscroll-behavior: contain; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--canvas); box-shadow: 0 8px 24px #0002; }
+.qa-thread-history-head { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px 10px; color: var(--ink-soft); font-size: 11px; }
+.qa-thread-history-head strong { color: var(--ink); font-weight: 500; }
+.qa-thread-item { display: flex; flex-direction: column; gap: 4px; width: 100%; margin: 2px 0; padding: 10px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.qa-thread-item[aria-current="true"] { border-color: var(--line-strong); background: var(--surface); }
+.qa-thread-item > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.qa-thread-item small { color: var(--ink-soft); font-size: 11px; }
+.qa-thread-error { position: absolute; z-index: 15; top: 100%; right: 0; left: 0; margin: 4px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); }

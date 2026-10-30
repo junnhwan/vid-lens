@@ -7,8 +7,8 @@ import type { PassageChoice } from "../contract/text"
 import type { TurnView } from "../contract/types"
 import { useExampleQuestions } from "./useExampleQuestions"
 
-const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), retryTurn: vi.fn() }))
-vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn; retryTurn = api.retryTurn } }))
+const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), retryTurn: vi.fn(), getConversation:vi.fn(), conversations:vi.fn(),createConversation:vi.fn() }))
+vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn; retryTurn = api.retryTurn;getConversation=api.getConversation;conversations=api.conversations;createConversation=api.createConversation } }))
 let view: ReturnType<typeof useExampleQuestions>
 let renderer: ReactTestRenderer | undefined
 function Questions() { view = useExampleQuestions("article", "文章", "章节", "chapter-id"); return null }
@@ -20,6 +20,8 @@ beforeEach(() => {
   api.session.mockResolvedValue({ capabilities: { selection_chars_max: 1000, question_chars_max: 4000 } })
   api.exampleConversation.mockResolvedValue({ conversation: { id: "conversation", article_id: "article", last_turn_id: null, active_turn_id: null } })
   api.turns.mockResolvedValue({ items: [] })
+  api.getConversation.mockImplementation(async () => api.exampleConversation("article"))
+  api.conversations.mockResolvedValue({items:[],has_more:false,next_before:null})
 })
 afterEach(async () => {
   await act(async () => renderer?.unmount())
@@ -28,6 +30,24 @@ afterEach(async () => {
 })
 
 describe("public example passage questions", () => {
+  it("keeps separate drafts when creating and switching example conversations", async () => {
+    const first={id:"first",request_id:"request",article_id:"article",snapshot_id:"snapshot",last_turn_id:null,active_turn_id:null,created_at:"2026-10-30T00:00:00Z"}
+    const second={...first,id:"second"}
+    api.exampleConversation.mockResolvedValue({conversation:first})
+    api.getConversation.mockImplementation(async id=>({conversation:id === first.id ? first : second}))
+    api.createConversation.mockResolvedValue({body:{conversation:second}})
+    await act(async()=>{renderer=create(createElement(Questions))})
+    await act(async()=>view.toggle())
+    await act(async()=>view.setDraft("示例旧草稿"))
+    await act(async()=>view.conversationHistory.create())
+    expect(view.currentConversation?.id).toBe(second.id)
+    expect(view.draft).toBe("")
+    await act(async()=>view.setDraft("示例新草稿"))
+    await act(async()=>view.conversationHistory.select(first.id))
+    expect(view.draft).toBe("示例旧草稿")
+    await act(async()=>view.conversationHistory.select(second.id))
+    expect(view.draft).toBe("示例新草稿")
+  })
   it("guards retries while accepting and ignores a late failure after leaving the example", async () => {
     const failed: TurnView = {
       schema_version: 1, execution: null, failure: null,

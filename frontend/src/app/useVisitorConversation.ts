@@ -22,6 +22,7 @@ import { starterPrompts, starterSection } from "./labels"
 import type { PendingQuestion } from "./pendingQuestion"
 import type { VisitorContext } from "./visitorContext"
 import { ObsoleteRequest, isTurnView, normalizeStep } from "./visitorContract"
+import { conversationWithTurns, useConversationHistory } from "./useConversationHistory"
 export function useVisitorConversation(context: VisitorContext, frameMap: Map<string, Frame>, loadHistory: (turnId?: string) => Promise<void>, absorb: (frames: Frame[]) => void) {
   const workspace = context.workspace
   const { lost: markLost, announce: setLive, notice: setNotice, report } = context.messages
@@ -54,9 +55,41 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
   const [focusToken, setFocusToken] = useState(0)
   const conversationRef = useRef<Conversation | null>(null)
   const turnsRef = useRef<TurnView[]>([])
+  const selection = useRef(0)
+  const composers = useRef(new Map<string, ReturnType<typeof captureComposer>>())
   const turnClock = useRef<Clock | null>(null)
   conversationRef.current = conversation
   turnsRef.current = turns
+  const history = useConversationHistory({
+    scope: context.request()?.request.id ?? workspace.route ?? "",
+    api: () => context.runtime()?.api ?? null, store, current: () => conversationRef.current,
+    disabled: () => sending.current,
+    windowSeconds: () => context.session()?.capabilities.idempotency_window_seconds ?? 86400,
+    activate: activateConversation,
+  })
+  function captureComposer() { return { draft, frameChip, passageChip, externalAllowed, referenceLinks, pendingQuestion, restore: restoreSend.current } }
+  function restoreComposer(id: string) {
+    const saved = composers.current.get(id)
+    setDraft(saved?.draft ?? ""); setFrameChip(saved?.frameChip ?? null); setPassageChip(saved?.passageChip ?? null)
+    setExternalAllowed(saved?.externalAllowed ?? false); setReferenceLinks(saved?.referenceLinks ?? "")
+    setPendingQuestion(saved?.pendingQuestion ?? null); restoreSend.current = saved?.restore ?? null
+  }
+  async function activateConversation(next: Conversation, owns: () => boolean) {
+    const current = conversationRef.current
+    if (current) composers.current.set(current.id, captureComposer())
+    const gen = workspace.epoch, token = ++selection.current
+    workspace.turn.stop(); turnClock.current = null; conversationLoad.current = null
+    rememberConversation(next); restoreComposer(next.id)
+    setTurns([]); turnsRef.current = []; setExpanded({}); setQaError("")
+    const page = await context.runtime()!.api.turns(next.id)
+    if (!owns() || !ownsRequest(gen, next.request_id) || selection.current !== token) return
+    if (page.items.some(item => item.turn.conversation_id !== next.id)) throw new ObsoleteRequest()
+    rememberConversation(conversationWithTurns(next, page.items))
+    setTurns(page.items); turnsRef.current = page.items
+    setTurnSteps(previous => ({ ...previous, ...Object.fromEntries(page.items.map(item => [item.turn.id, asSteps(item.activity.recent_steps).map(normalizeStep)])) }))
+    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
+    setFocusToken(value => value + 1)
+  }
   function rememberConversation(next: Conversation) {
     conversationRef.current = next
     setConversation(next)
@@ -76,7 +109,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     absorb([...(view.turn.answer?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
     const terminal = isTerminalStatus(view.turn.status)
     setConversation((prev) => {
-      if (!prev) return prev
+      if (!prev || prev.id !== view.turn.conversation_id) return prev
       const next = {
         ...prev,
         active_turn_id: terminal ? (prev.active_turn_id === view.turn.id ? null : prev.active_turn_id) : view.turn.id,
@@ -148,11 +181,11 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       })(),
       scope: { type: "turn", id },
       getSnapshot: () => context.runtime()!.api.getTurn(conversationId, id),
-      onSnapshot: (payload, source) => (ownsWorkspace(gen, ownerId) ? onTurnSnapshot(payload, source) : "close"),
-      onUpsert: (step, currentId, position) => (ownsWorkspace(gen, ownerId) ? onTurnUpsert(step, currentId, position) : "close"),
-      onAuth: (message) => { if (ownsWorkspace(gen, ownerId)) markLost(message) },
+      onSnapshot: (payload, source) => (ownsWorkspace(gen, ownerId) && conversationRef.current?.id === conversationId ? onTurnSnapshot(payload, source) : "close"),
+      onUpsert: (step, currentId, position) => (ownsWorkspace(gen, ownerId) && conversationRef.current?.id === conversationId && workspace.turn.id === id ? onTurnUpsert(step, currentId, position) : "close"),
+      onAuth: (message) => { if (ownsWorkspace(gen, ownerId) && conversationRef.current?.id === conversationId) markLost(message) },
       onStatus: (status) => {
-        if (ownsWorkspace(gen, ownerId) && status === "reconnecting") setLive("正在重新连接回答")
+        if (ownsWorkspace(gen, ownerId) && conversationRef.current?.id === conversationId && status === "reconnecting") setLive("正在重新连接回答")
       },
     })
     workspace.turn.attach(id, stream, view.stream.cursor)
@@ -169,13 +202,23 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     if (!force && conversationRef.current?.request_id === current.request.id) return conversationRef.current
     const gen = workspace.epoch
     const id = current.request.id
+    const token = selection.current
     try {
-      const response = await rt.api.conversation(id)
-      if (!ownsRequest(gen, id) || response.conversation.request_id !== id) throw new ObsoleteRequest()
+      const preferred = conversationRef.current?.request_id === id ? conversationRef.current.id : history.preferredID()
+      let response
+      try { response = preferred ? await rt.api.getConversation(preferred) : await rt.api.conversation(id) }
+      catch (error) {
+        if (!preferred || !isApiError(error) || error.status !== 404) throw error
+        history.forgetSelection(); response = await rt.api.conversation(id)
+      }
+      if (!ownsRequest(gen, id) || token !== selection.current || response.conversation.request_id !== id) throw new ObsoleteRequest()
       rememberConversation(response.conversation)
+      history.remember(response.conversation)
       const page = await rt.api.turns(response.conversation.id)
-      if (!ownsRequest(gen, id) || conversationRef.current?.id !== response.conversation.id) throw new ObsoleteRequest()
+      if (!ownsRequest(gen, id) || token !== selection.current || conversationRef.current?.id !== response.conversation.id) throw new ObsoleteRequest()
       if (page.items.some((item) => item.turn.conversation_id !== response.conversation.id)) throw new ObsoleteRequest()
+      const loadedConversation = conversationWithTurns(response.conversation, page.items)
+      rememberConversation(loadedConversation)
       setTurns(page.items)
       turnsRef.current = page.items
       setTurnSteps((prev) => {
@@ -189,7 +232,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
         return next
       })
       for (const turn of page.items) absorb([...(turn.turn.answer?.frames ?? [])])
-      return response.conversation
+      void history.refresh(false, response.conversation.request_id)
+      return loadedConversation
     } catch (error) {
       if (!ownsRequest(gen, id)) throw new ObsoleteRequest()
       throw error
@@ -241,6 +285,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
   const prompts = starterPrompts(article?.article.title, article?.article.sections[0]?.title)
   const suggesting = prompts[0]
   function reset() {
+    selection.current++; composers.current.clear(); history.reset()
     workspace.turn.stop(); turnClock.current = null
     conversationRef.current = null; turnsRef.current = []; turnStepsRef.current = {}
     setConversation(null); setTurns([]); setTurnSteps({}); setQaOpen(false); setQaError(""); setQaBusy(false)
@@ -252,6 +297,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     mergeHistory: (id: string, steps: ActivityStep[]) => setTurnSteps(prev => ({ ...prev, [id]: mergeSteps(prev[id] ?? [], steps, false) })),
     view: {
       turns,
+      currentConversation: conversation,
+      conversationHistory: history.controls,
       stepsFor: (turn: TurnView) => resolvedTurns[turn.turn.id] ?? asSteps(turn.activity.recent_steps).map(normalizeStep),
       qaOpen,
       draft,
@@ -266,7 +313,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       passageChip,
       suggesting,
       prompts,
-      qaBusy,
+      qaBusy: qaBusy || history.controls.busy,
       pendingQuestion,
       restoreQuestion: () => { if (pendingQuestion?.phase === "failed") { restoreSend.current?.(); setPendingQuestion(null); setFocusToken(value => value + 1) } },
       qaError,
@@ -310,7 +357,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       },
       send: () =>
         void (async () => {
-          if (sending.current) return
+          if (sending.current || history.isBusy()) return
           const text = draft.trim()
           if (!text) {
             setQaError("先写下一个问题。")
@@ -427,7 +474,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
         void (async () => {
           const rt = context.runtime()
           const current = conversationRef.current
-          if (!rt || !current || sending.current || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
+          if (!rt || !current || sending.current || history.isBusy() || !turn.actions.can_retry || current.last_turn_id !== turn.turn.id || turnsRef.current.some(item => !isTerminalStatus(item.turn.status))) return
           const gen = workspace.epoch
           const id = current.request_id
           const slot = `turn-retry:${current.id}:${turn.turn.id}`

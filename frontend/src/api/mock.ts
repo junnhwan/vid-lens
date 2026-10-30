@@ -376,6 +376,7 @@ class MockWorld {
   private requests = new Map<string, Job>()
   private turns = new Map<string, Talk>()
   private conversations = new Map<string, Conversation>()
+  private conversationKeys = new Map<string, string>()
   private requestKeys = new Map<string, Recorded>()
   private turnKeys = new Map<string, Recorded>()
   private sockets = new Set<MockSocket>()
@@ -464,6 +465,22 @@ class MockWorld {
         }
       },
       conversation: async (requestId) => this.conversation(this.mustJob(requestId)),
+      getConversation: async (id) => {
+        const conversation = this.conversations.get(id)
+        if (!conversation) throw new ApiError({status:404,code:"RESOURCE_NOT_FOUND",detail:"资源不存在。"})
+        return {schema_version:1,conversation}
+      },
+      conversations: async (requestId) => ({ schema_version:1, has_more:false, next_before:null, items: [...this.conversations.values()].filter(c=>c.request_id===requestId).reverse().map(c=>{
+        const turns=[...this.turns.values()].filter(t=>t.conversationId===c.id)
+        return {...c,title:turns[0]?.question||"新会话",updated_at:c.created_at,turn_count:turns.length}
+      }) }),
+      createConversation: async (requestId,key) => {
+        const slot=`${requestId}:${key}`,previous=this.conversationKeys.get(slot)
+        if(previous) return this.accepted({schema_version:1,conversation:this.conversations.get(previous)!},true)
+        const body=this.conversation(this.mustJob(requestId),true)
+        this.conversationKeys.set(slot,body.conversation.id)
+        return this.accepted(body,false)
+      },
       turns: async (conversationId) => ({
         schema_version: 1,
         items: [...this.turns.values()]
@@ -749,17 +766,17 @@ class MockWorld {
     }
   }
 
-  private conversation(job: Job) {
+  private conversation(job: Job, create = false) {
     if (job.status !== "completed")
       throw new ApiError({
         status: 409,
         code: "ARTICLE_NOT_READY",
         detail: "文章还没有发布。",
       })
-    let conversation = [...this.conversations.values()].find((item) => item.request_id === job.id)
+    let conversation = create ? undefined : [...this.conversations.values()].reverse().find((item) => item.request_id === job.id)
     if (!conversation) {
       conversation = {
-        id: `con_${job.id}`,
+        id: create ? `con_${job.id}_${this.conversations.size}` : `con_${job.id}`,
         request_id: job.id,
         article_id: article.id,
         snapshot_id: "snap_mock",

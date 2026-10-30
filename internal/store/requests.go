@@ -301,7 +301,7 @@ func (s *Store) EnsureConversation(ctx context.Context, session, request string)
 		if r.Status != "completed" || r.ArticleID == nil {
 			return domain.Err(409, "ARTICLE_NOT_READY", "文章尚未发布。")
 		}
-		v, e = one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE session_id=$1 AND request_id=$2", session, request)
+		v, e = one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE session_id=$1 AND request_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1", session, request)
 		if e == nil {
 			return nil
 		}
@@ -390,7 +390,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 			}
 			if retry == "" {
 				var asked int
-				if e = tx.QueryRow(ctx, "SELECT count(*) FROM qa_turns WHERE conversation_id=$1 AND retry_of_id IS NULL", c.ID).Scan(&asked); e != nil {
+				if e = tx.QueryRow(ctx, "SELECT count(*) FROM qa_turns WHERE request_id=$1 AND retry_of_id IS NULL", c.RequestID).Scan(&asked); e != nil {
 					return e
 				}
 				if asked >= ExampleQuestionLimit {

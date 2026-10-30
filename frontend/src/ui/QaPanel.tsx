@@ -7,11 +7,16 @@ import { ActivityList } from "./ActivityList"
 import { ReferenceCard } from "./ReferenceCard"
 import { prefersReduced } from "./motion"
 import type { PendingQuestion } from "../app/pendingQuestion"
+import { ConversationSwitcher } from "./ConversationSwitcher"
+import type { Conversation } from "../contract/types"
+import type { ConversationHistoryControls } from "../app/useConversationHistory"
 
 export function QaPanel({
   open,
   historyState,
   turns,
+  currentConversation,
+  conversationHistory,
   pendingQuestion,
   onRestoreQuestion,
   stepsFor,
@@ -52,6 +57,8 @@ export function QaPanel({
   open: boolean
   historyState?: Record<string, string>
   turns: TurnView[]
+  currentConversation?: Conversation | null
+  conversationHistory?: ConversationHistoryControls
   pendingQuestion?: PendingQuestion | null
   onRestoreQuestion?: () => void
   stepsFor: (turn: TurnView) => ActivityStep[]
@@ -96,6 +103,7 @@ export function QaPanel({
   const [newAnswer, setNewAnswer] = useState(false)
   const previousStatus = useRef(new Map<string, string>())
   const active = turns.find((turn) => !["completed", "failed", "canceled"].includes(turn.turn.status))
+  useEffect(() => { nearBottom.current = true; setNewAnswer(false); previousStatus.current.clear() }, [currentConversation?.id])
 
   useEffect(() => {
     const section = sectionRef.current
@@ -163,6 +171,7 @@ export function QaPanel({
           </button>
         </div>
       </header>
+      {conversationHistory ? <ConversationSwitcher history={conversationHistory} currentID={currentConversation?.id} title={conversationHistory.items.find(item => item.id === currentConversation?.id && item.title !== "新会话")?.title || turns[0]?.turn.question || "新会话"} disabled={busy} /> : null}
       <div
         className="qa-log"
         ref={logRef}

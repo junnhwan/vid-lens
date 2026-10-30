@@ -272,6 +272,8 @@ export function App() {
               frames={visitor.frames}
               qaOpen={visitor.qaOpen}
               turns={visitor.turns}
+              currentConversation={visitor.currentConversation}
+              conversationHistory={visitor.conversationHistory}
               pendingQuestion={visitor.pendingQuestion}
               onRestoreQuestion={visitor.restoreQuestion}
               stepsFor={visitor.stepsFor}
