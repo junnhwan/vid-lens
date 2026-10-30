@@ -88,7 +88,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     rememberConversation(conversationWithTurns(next, page.items))
     setTurns(page.items); turnsRef.current = page.items
     setTurnSteps(previous => ({ ...previous, ...Object.fromEntries(page.items.map(item => [item.turn.id, asSteps(item.activity.recent_steps).map(normalizeStep)])) }))
-    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
+    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? item.answer_preview?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
     setFocusToken(value => value + 1)
   }
   function rememberConversation(next: Conversation) {
@@ -107,7 +107,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       ...prev,
       [view.turn.id]: mergeActivitySnapshot(prev[view.turn.id] ?? [], asSteps(view.activity.recent_steps).map(normalizeStep), { replace, sameResource: !!prev[view.turn.id], expired: view.activity.history_status === "expired" }),
     }))
-    absorb([...(view.turn.answer?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
+    absorb([...(view.turn.answer?.frames ?? view.answer_preview?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
     const terminal = isTerminalStatus(view.turn.status)
     setConversation((prev) => {
       if (!prev || prev.id !== view.turn.conversation_id) return prev
@@ -232,7 +232,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
           )
         return next
       })
-      for (const turn of page.items) absorb([...(turn.turn.answer?.frames ?? [])])
+      for (const turn of page.items) absorb([...(turn.turn.answer?.frames ?? turn.answer_preview?.frames ?? [])])
       void history.refresh(false, response.conversation.request_id)
       return loadedConversation
     } catch (error) {

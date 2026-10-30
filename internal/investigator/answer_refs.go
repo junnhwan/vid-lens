@@ -121,10 +121,16 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		if e := validateAnswerParts(&a); e != nil {
 			return nil, &candidateError{err: e}
 		}
-		if e := s.reviewAnswer(ctx, a); e != nil {
+		if s.limitedQuestionDelivery() {
+			var e error
+			a, e = s.prepareQuestionDelivery(ctx, a)
+			if e != nil {
+				return nil, e
+			}
+		} else if e := s.reviewAnswer(ctx, a); e != nil {
 			return nil, e
 		}
-		if s.focusedQuestion() {
+		if s.focusedQuestion() && !s.limitedQuestionDelivery() {
 			if e := s.answerEvidence(ctx, &a); e != nil {
 				return nil, e
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/cloudwego/eino/schema"
@@ -95,6 +96,11 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
 	if s.semanticQuestionReading() {
 		instruction = questionReadingInstructions
+		if s.limitedQuestionDelivery() {
+			instruction = strings.ReplaceAll(instruction, "无待观察图或关键阻塞且本问必要事实齐备时", "本问必要依据足够时")
+			instruction = strings.ReplaceAll(instruction, "提交不等于批准：程序校验来源、像素与正文，独立核验通过后才展示。", "提交不等于批准：程序先校验来源、像素与正文，并展示明确标为核验中的参考解读；独立核验支持的内容正式交付，未确认或有冲突的说法单列，核验服务无结果时仍交付标注状态的有限回答。")
+			instruction += questionDeliveryInstructions
+		}
 		if s.focusedQuestion() {
 			instruction += questionFocusInstructions
 		}

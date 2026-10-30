@@ -29,6 +29,8 @@ export function AnswerBody({ answer, ...props }: Props) {
   const evidenceRef = useRef<HTMLDetailsElement>(null)
   useEffect(() => { if (sourceID) evidenceRef.current?.scrollIntoView({ block: "nearest" }) }, [sourceID])
   const evidence = answer.evidence
+  const reviewLabels: Record<string,string> = {pending:"参考解读 · 正在独立核验",passed:"已完成独立核验",partial:"部分内容已核验",unavailable:"有限回答 · 独立核验未完成"}
+  const uncertainties = evidence?.uncertainties ?? []
   const sources = evidence?.text_sources ?? []
   const source = sources.find(item => item.citation_id === sourceID) ?? sources[0]
   const citation = source ? answer.citations[source.citation_id] : undefined
@@ -46,6 +48,7 @@ export function AnswerBody({ answer, ...props }: Props) {
   const firstText = first?.type === "paragraph" ? (first.content ?? []).filter((inline) => inline.type === "text").map((inline) => inline.text ?? "").join("") : ""
   const repeatedLead = !!answer.summary && normalize(answer.summary) === normalize(firstText)
   return <div className="turn-answer">
+    {evidence?.review_reason ? <div className={`answer-review answer-review-${evidence.review}`} role="status"><strong>{reviewLabels[evidence.review] ?? "核验状态未确认"}</strong><p>{evidence.review_reason}</p></div> : null}
     {evidence ? <details ref={evidenceRef} className="answer-evidence" open={evidenceOpen} onToggle={event => setEvidenceOpen(event.currentTarget.open)}>
       <summary>{sources.length ? `依据 ${sources.length} 处视频原文` : "查看回答依据"}<span> · {evidence.viewed_frame_ids.length ? `本轮已查看 ${evidence.viewed_frame_ids.length} 张画面` : "本轮未查看画面"}</span></summary>
       <div className="answer-evidence-body">
@@ -68,6 +71,7 @@ export function AnswerBody({ answer, ...props }: Props) {
       {part.title ? <h4>{part.title}</h4> : null}
       {part.blocks.map((block) => <BlockView key={block.id} block={block} sectionId={block.id} citations={answer.citations ?? {}} {...props} onCite={onCite} />)}
     </section>)}</div>
-    {answer.limitations?.length ? <details className="answer-limits"><summary>证据与限制 <span>{answer.limitations.length}</span></summary><ul>{answer.limitations.map((item,index) => <li key={`${item.code}-${index}`}>{item.message} <Inlines items={(item.citation_ids ?? []).map((id) => ({type:"citation",citation_id:id}))} citations={answer.citations ?? {}} onCite={onCite} /></li>)}</ul></details> : null}
+    {uncertainties.length ? <section className="answer-uncertainties" aria-label="未确认项"><h4>未确认项</h4><ul>{uncertainties.map((item,index) => <li key={index}><blockquote>{item.claim}</blockquote><p>{item.reason} <Inlines items={(item.citation_ids ?? []).map(id => ({type:"citation",citation_id:id}))} citations={answer.citations ?? {}} onCite={onCite}/></p></li>)}</ul></section> : null}
+    {answer.limitations?.length ? <details className="answer-limits" open={!!evidence?.review_reason}><summary>尚未确认与适用范围 <span>{answer.limitations.length}</span></summary><ul>{answer.limitations.map((item,index) => <li key={`${item.code}-${index}`}>{item.message} <Inlines items={(item.citation_ids ?? []).map((id) => ({type:"citation",citation_id:id}))} citations={answer.citations ?? {}} onCite={onCite} /></li>)}</ul></details> : null}
   </div>
 }

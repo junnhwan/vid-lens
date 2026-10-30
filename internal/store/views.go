@@ -621,6 +621,23 @@ func (s *Store) turnView(ctx context.Context, q Querier, session, conversation, 
 	latest := c.LastTurnID != nil && *c.LastTurnID == id
 	canRetry := latest && (t.Status == "canceled" || t.Status == "failed" && t.Failure != nil && t.Failure.CanRetry)
 	v := map[string]any{"server_now": time.Now().UTC(), "schema_version": 1, "turn": turn, "execution": execution(&r), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(t.Status)), "failure": t.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(t.Status) && t.Status != "cancel_requested", "can_retry": canRetry, "can_submit_next": latest && domain.Terminal(t.Status)}, "stream": s.stream(pos, base)}
+	if t.Answer == nil {
+		preview, err := one[domain.Answer](ctx, q, "SELECT result FROM run_operations WHERE run_id=$1 AND kind='question_preview' AND status='completed' ORDER BY completed_at DESC,operation_key DESC LIMIT 1", r.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, pos, err
+		}
+		if err == nil {
+			ids := []string{}
+			for _, f := range preview.Frames {
+				ids = append(ids, f.ID)
+			}
+			preview.Frames, e = frames(ctx, q, t.RequestID, ids)
+			if e != nil {
+				return nil, pos, e
+			}
+			v["answer_preview"] = preview
+		}
+	}
 	return v, pos, nil
 }
 func (s *Store) TurnView(ctx context.Context, session, conversation, id string) (map[string]any, Position, error) {

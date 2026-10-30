@@ -591,7 +591,8 @@ func (s *Store) RecordObservation(ctx context.Context, c domain.Claim, key, insp
 		var existing []byte
 		e := tx.QueryRow(ctx, "SELECT data FROM observations WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key).Scan(&existing)
 		if e == nil {
-			if Hash(json.RawMessage(existing)) != Hash(data) {
+			var saved, incoming any
+			if json.Unmarshal(existing, &saved) != nil || json.Unmarshal(domain.JSON(data), &incoming) != nil || Hash(saved) != Hash(incoming) {
 				return errors.New("observation replay conflict")
 			}
 			return nil

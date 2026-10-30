@@ -1,7 +1,7 @@
 import { createElement, type ComponentProps } from "react"
 import { act, create, type ReactTestRenderer } from "react-test-renderer"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { ActivityStep, RunStatus, TurnView } from "../contract/types"
+import type { ActivityStep, Answer, RunStatus, TurnView } from "../contract/types"
 import { turnProgress, TurnProgress } from "./TurnProgress"
 import { QaPanel } from "./QaPanel"
 
@@ -15,6 +15,30 @@ let renderer: ReactTestRenderer | undefined
 afterEach(async()=>{ await act(async()=>renderer?.unmount());renderer=undefined;vi.unstubAllGlobals();vi.restoreAllMocks() })
 
 describe("question progress",()=>{
+  it("shows a provisional answer while review is running and replaces it with the final result",async()=>{
+    vi.stubGlobal("window",{setInterval,clearInterval,matchMedia:()=>({matches:true})})
+    const preview:Answer={kind:"limited",summary:"先看已有依据",blocks:[{id:"p",type:"paragraph",origin:"video",content:[{type:"text",text:"原文支持的参考解释"}]}],citations:{},frames:[],limitations:[],evidence:{review:"pending",review_reason:"独立核验正在进行",text_sources:[],viewed_frame_ids:[]}}
+    const props=panelProps({...view(),answer_preview:preview})
+    await act(async()=>{renderer=create(createElement(QaPanel,props))})
+    expect(JSON.stringify(renderer?.toJSON())).toContain("原文支持的参考解释")
+    expect(JSON.stringify(renderer?.toJSON())).toContain("参考解读 · 正在独立核验")
+    expect(JSON.stringify(renderer?.toJSON())).toContain("参考解读已显示")
+    expect(renderer!.root.findAllByType("button").find(button=>button.props.className==="send stop-send")?.props.hidden).toBe(false)
+    const final:Answer={...preview,summary:"正式的有限结论",evidence:{...preview.evidence!,review:"partial",review_reason:"只保留支持的部分",uncertainties:[{claim:"未证实的全片排名",reason:"仅查看了局部"}]}}
+    await act(async()=>{renderer!.update(createElement(QaPanel,{...props,turns:[{...view("completed"),turn:{...view("completed").turn,answer:final}}]}))})
+    expect(JSON.stringify(renderer?.toJSON())).not.toContain("参考解读 · 正在独立核验")
+    expect(JSON.stringify(renderer?.toJSON())).toContain("部分内容已核验")
+    expect(JSON.stringify(renderer?.toJSON())).toContain("未证实的全片排名")
+  })
+  it("retains a stopped preview without claiming review is still running",async()=>{
+    vi.stubGlobal("window",{setInterval,clearInterval,matchMedia:()=>({matches:true})})
+    const preview:Answer={kind:"limited",summary:"已保存参考解读",blocks:[],citations:{},frames:[],limitations:[],evidence:{review:"pending",review_reason:"独立核验正在进行",text_sources:[],viewed_frame_ids:[]}}
+    await act(async()=>{renderer=create(createElement(QaPanel,panelProps({...view("canceled"),answer_preview:preview})))})
+    const text=JSON.stringify(renderer?.toJSON())
+    expect(text).toContain("已保存参考解读")
+    expect(text).toContain("后续核验已停止")
+    expect(text).not.toContain("参考解读 · 正在独立核验")
+  })
   it("shows actual review thinking and stops claiming fresh activity when the receipt ages",()=>{
     expect(turnProgress(view(),current,now).title).toBe("正在核对回答依据 · 模型思考中")
     const quiet = turnProgress(view(),current,now+30000)
@@ -54,3 +78,7 @@ describe("question progress",()=>{
     expect(stop().props.hidden).toBe(true)
   })
 })
+
+function panelProps(turn:TurnView):ComponentProps<typeof QaPanel> {
+  return {open:true,turns:[turn],stepsFor:()=>[current],frames:new Map(),draft:"",frameChip:null,passageChip:null,prompts:[],busy:false,error:"",expanded:{},focusToken:0,onDraft:()=>{},onSend:()=>{},onStop:async()=>{},onRetry:()=>{},onClose:()=>{},onToggle:()=>{},onSuggest:()=>{},onRemoveFrame:()=>{},onRemovePassage:()=>{},onOpenFrame:()=>{},onCite:()=>{},onBroken:()=>{},externalAllowed:false,externalAvailable:false,searchAvailable:false,referenceLinks:"",onExternal:()=>{},onReferenceLinks:()=>{},modelUnavailable:false}
+}

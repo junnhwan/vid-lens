@@ -418,13 +418,8 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	select {
 	case messages := <-requests:
 		text := wireText(t, messages[0])
-		sourceInstruction := sourceContextInstructions + "\n" + adaptiveSourceCardInstructions + "\n" + reviewCoverageRepairInstructions
-		if !strings.HasSuffix(text, "\n"+sourceInstruction) {
-			t.Fatal("new question omitted bounded source contract")
-		}
-		hash := sha256.Sum256([]byte(strings.TrimSuffix(text, "\n"+sourceInstruction)))
-		if hex.EncodeToString(hash[:]) != frozenPromptHash(t, 16, true) {
-			t.Fatal("new question inherited its article's old authoring protocol")
+		if !strings.Contains(text, "只回答用户当前问题") || !strings.Contains(text, "submit_answer") || !strings.Contains(text, "refine_video_frames") || !strings.Contains(text, "独立核验") || strings.Contains(text, "record_source_notes") {
+			t.Fatal("new question did not receive focused evidence and qualified delivery instructions")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("new question did not reach the provider", err)
@@ -441,7 +436,7 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	if err = json.Unmarshal(run.Checkpoint, &cp); err != nil {
 		t.Fatal(err)
 	}
-	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
+	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.InputRevision != domain.QuestionReadingV6 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
 		t.Fatal("question did not persist its own execution contract")
 	}
 }

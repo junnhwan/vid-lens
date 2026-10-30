@@ -137,14 +137,19 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	return errors.Join(problems...)
 }
 func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
-	if a.Kind != "grounded" && a.Kind != "insufficient_evidence" && a.Kind != "out_of_scope" {
+	if a.Kind != "grounded" && a.Kind != "insufficient_evidence" && a.Kind != "out_of_scope" && !(s.limitedQuestionDelivery() && a.Kind == "limited" && a.Evidence != nil) {
 		return invalid("回答 kind 无效")
 	}
 	if a.Summary == "" || len(a.Blocks) == 0 {
 		return invalid("缺少答案")
 	}
-	if len(s.unobserved(ctx)) > 0 {
-		return missingEvidence("答案引用的图片尚未完成观察")
+	pending := s.unobserved(ctx)
+	if s.limitedQuestionDelivery() {
+		cited := storeFrameIDs(a.Blocks, a.Citations)
+		pending = slices.DeleteFunc(pending, func(id string) bool { return !slices.Contains(cited, id) })
+	}
+	if len(pending) > 0 {
+		return missingEvidence("答案实际引用的图片尚未完成观察：" + strings.Join(pending, ","))
 	}
 	if e := s.validateBlocks(ctx, a.Blocks, a.Citations, false); e != nil {
 		return e
@@ -160,6 +165,13 @@ func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
 		return e
 	}
 	ids := storeFrameIDs(a.Blocks, a.Citations)
+	if s.limitedQuestionDelivery() && a.Evidence != nil {
+		for _, id := range a.Evidence.ViewedFrameIDs {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
 	frames, e := s.engine.Store.PublicFrames(ctx, s.turn.RequestID, ids)
 	if e != nil {
 		return e

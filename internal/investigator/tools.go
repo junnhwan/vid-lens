@@ -137,7 +137,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 				}
 			}
 		}()
-		if t.name == "inspect_video_window" && s.cp.InspectBatchRejected[callID(ctx)] {
+		if (t.name == "inspect_video_window" || t.name == "refine_video_frames") && s.cp.InspectBatchRejected[callID(ctx)] {
 			return toolError("本轮多个inspect已整组拒绝，没有创建图片或问题。每轮只提交一个inspect；先观察已交付图片。")
 		}
 	}
@@ -192,6 +192,8 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		}
 	case "inspect_video_window":
 		target = &inspectInput{}
+	case "refine_video_frames":
+		target = &refineFrameInput{}
 	case "find_evidence":
 		target = &findInput{}
 	case "read_source":
@@ -478,8 +480,11 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return nil, e
 		}
 	}
+	if e := s.refinementTool(add); e != nil {
+		return nil, e
+	}
 	if e := add(utils.InferEnhancedTool("inspect_video_window", "Return actual pixels. Use window with start_ms/end_ms/count/mode (overview, detail, sequence). Omit crop unless cropping a real delivered parent_frame_id. Or supply frame_ids without window to reload. Record new images before requesting more. No paths/URLs.", func(ctx context.Context, in inspectInput) (*schema.ToolResult, error) {
-		if len(s.unobserved(ctx)) > 0 {
+		if !s.limitedQuestionDelivery() && len(s.unobserved(ctx)) > 0 {
 			return toolError("请先记录刚收到图片的观察；尚未记录：" + strings.Join(s.unobserved(ctx), ","))
 		}
 		if strings.TrimSpace(in.Question) == "" {

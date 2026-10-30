@@ -106,7 +106,7 @@ func responseActivity(result *schema.Message) (string, string) {
 	switch names[0] {
 	case "record_observation":
 		return "已收到视频画面观察", "接下来保存事实与尚未确认的问题。"
-	case "inspect_video_window", "read_source", "find_evidence", "read_evidence", "view_frames":
+	case "inspect_video_window", "refine_video_frames", "read_source", "find_evidence", "read_evidence", "view_frames":
 		var in struct {
 			ActivityTitle string `json:"activity_title"`
 		}
@@ -156,7 +156,7 @@ func streamActivity(name string) string {
 		return "正在准备文章校验请求"
 	case "submit_answer":
 		return "正在生成正式回答候选"
-	case "inspect_video_window", "view_frames":
+	case "inspect_video_window", "refine_video_frames", "view_frames":
 		return "正在选择需要核对的视频片段"
 	case loopReviewTool:
 		return "正在综合核对主题、原文与配图"

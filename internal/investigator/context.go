@@ -17,16 +17,17 @@ import (
 )
 
 type checkpoint struct {
-	QuestionTiming        *config.QuestionTiming    `json:"question_timing,omitempty"`
-	ArticleDeliveryPolicy string                    `json:"article_delivery_policy,omitempty"`
-	ArticleLoopParent     json.RawMessage           `json:"article_loop_parent,omitempty"`
-	ArticleLoop           *articleLoopState         `json:"article_loop,omitempty"`
-	Workflow              *workflowState            `json:"workflow,omitempty"`
-	SourceNotes           []sourceNote              `json:"source_notes,omitempty"`
-	SourceIndexProtocol   string                    `json:"source_index_protocol,omitempty"`
-	SourceChunkDelivered  string                    `json:"source_chunk_delivered,omitempty"`
-	PendingOverview       []string                  `json:"pending_overview,omitempty"`
-	ExecutionContract     *domain.ExecutionContract `json:"execution_contract,omitempty"`
+	FrameRefinements      map[string]frameRefinement `json:"frame_refinements,omitempty"`
+	QuestionTiming        *config.QuestionTiming     `json:"question_timing,omitempty"`
+	ArticleDeliveryPolicy string                     `json:"article_delivery_policy,omitempty"`
+	ArticleLoopParent     json.RawMessage            `json:"article_loop_parent,omitempty"`
+	ArticleLoop           *articleLoopState          `json:"article_loop,omitempty"`
+	Workflow              *workflowState             `json:"workflow,omitempty"`
+	SourceNotes           []sourceNote               `json:"source_notes,omitempty"`
+	SourceIndexProtocol   string                     `json:"source_index_protocol,omitempty"`
+	SourceChunkDelivered  string                     `json:"source_chunk_delivered,omitempty"`
+	PendingOverview       []string                   `json:"pending_overview,omitempty"`
+	ExecutionContract     *domain.ExecutionContract  `json:"execution_contract,omitempty"`
 
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
 	PlanHash             string              `json:"plan_hash,omitempty"`
@@ -371,7 +372,7 @@ func (m *middleware) AfterModelRewriteState(ctx context.Context, state *adk.Chat
 			last := state.Messages[len(state.Messages)-1]
 			if last.Role == schema.Assistant && rejectInspectionBatch(last.ToolCalls) {
 				for _, c := range last.ToolCalls {
-					if c.Function.Name == "inspect_video_window" {
+					if c.Function.Name == "inspect_video_window" || c.Function.Name == "refine_video_frames" {
 						m.s.cp.InspectBatchRejected[c.ID] = true
 					}
 				}

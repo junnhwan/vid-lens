@@ -51,7 +51,7 @@ func (s *session) repairLimit() int {
 func rejectInspectionBatch(calls []schema.ToolCall) bool {
 	n := 0
 	for _, c := range calls {
-		if c.Function.Name == "inspect_video_window" {
+		if c.Function.Name == "inspect_video_window" || c.Function.Name == "refine_video_frames" {
 			n++
 		}
 	}
@@ -137,6 +137,12 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	if s.questionReading() {
 		delete(out, "can_compose")
 		out["can_submit_answer"] = len(pending) == 0 && len(blockers) == 0
+		if s.limitedQuestionDelivery() {
+			out["can_submit_answer"] = true
+			out["pending_frames_rule"] = "Only frames actually cited by this answer need observations. Unused candidates do not block submission. Record relevant unknowns in limitations; use refine_video_frames only when low-information pixels leave a necessary gap."
+			out["next_action"] = "Submit the concise answer as soon as the current question has enough source evidence. Observe only frames actually cited. If low-information pixels still hide a necessary detail, batch nearby samples with refine_video_frames; otherwise omit the irrelevant candidates. List specific unknowns separately. The server delivers a labeled preview and an explicit independent-review status."
+			out["nearby_refinements_remaining"] = max(0, 2-len(s.cp.FrameRefinements))
+		}
 		out["required_scope"] = "current_question"
 		out["submission_is_not_approval"] = true
 		remaining := max(time.Duration(0), s.profile.ActiveBudget("qa.answer")-time.Duration(s.claim.Run.ActiveMS)*time.Millisecond)

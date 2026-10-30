@@ -13,6 +13,9 @@ import (
 )
 
 func (s *session) requireAnswerPublicationReview(ctx context.Context, a domain.Answer) error {
+	if s.limitedQuestionDelivery() {
+		return s.requireQuestionDelivery(ctx, a)
+	}
 	if s.stagedWorkflow() {
 		return s.requireWorkflowReview(ctx, workflowArticleCandidate(workflowAnswerArticle(a)), a.Citations)
 	}

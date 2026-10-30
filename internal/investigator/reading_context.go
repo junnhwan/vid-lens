@@ -51,7 +51,11 @@ func (s *session) focusedQuestion() bool {
 }
 
 func (s *session) compactQuestionReview() bool {
-	return s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV5
+	return s.questionReading() && (s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV5 || s.limitedQuestionDelivery())
+}
+
+func (s *session) limitedQuestionDelivery() bool {
+	return s.turn != nil && s.cp.ExecutionContract != nil && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV6
 }
 
 func (s *session) indexedReview() bool {

@@ -74,13 +74,10 @@ func StagedWorkflowContract(version string) bool {
 	return version == ExecutionContractV10 || version == ExecutionContractV11 || version == ExecutionContractV12
 }
 
-// QuestionContract explicitly decouples the article writer from the existing
-// interactive QA adapter, including image and external-reference questions.
+// All new questions use the interactive adapter independently of article age.
+// Restored runs retain their previously frozen contract and input revision.
 func QuestionContract(articleVersion string, workflow, external bool) string {
-	if external || ArticleLoopContract(articleVersion) || !workflow {
-		return ExecutionContractV9
-	}
-	return ExecutionContractV12
+	return ExecutionContractV9
 }
 
 type ExecutionContract struct {
@@ -94,6 +91,7 @@ const QuestionReadingV2 = "qa-article-reading-2026-10-22-v2"
 const QuestionReadingV3 = "qa-article-reading-2026-10-29-v3"
 const QuestionReadingV4 = "qa-article-reading-2026-10-29-v4"
 const QuestionReadingV5 = "qa-article-reading-2026-10-29-v5"
+const QuestionReadingV6 = "qa-article-reading-2026-10-30-v6"
 
 func QuestionReadingContract(version string) bool {
 	return version == QuestionReadingV1 || QuestionSemanticReadingContract(version)
@@ -105,12 +103,9 @@ func QuestionReadingContract(version string) bool {
 // reviewer and records server-owned answer provenance. V5 combines small reviews
 // and conservatively admits actionable feedback. Older inputs stay frozen.
 func QuestionSemanticReadingContract(version string) bool {
-	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4 || version == QuestionReadingV5
+	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4 || version == QuestionReadingV5 || version == QuestionReadingV6
 }
 
 func QuestionInputRevision(articleVersion string) string {
-	if articleVersion == ArticleLoopV2 {
-		return QuestionReadingV5
-	}
-	return ""
+	return QuestionReadingV6
 }

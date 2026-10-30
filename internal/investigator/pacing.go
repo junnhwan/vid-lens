@@ -135,7 +135,7 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 			answerTools := []*schema.ToolInfo{}
 			for _, t := range in {
 				switch t.Name {
-				case "submit_answer", "record_observation", "inspect_video_window", "find_evidence", "read_source", "read_candidate_fields":
+				case "submit_answer", "record_observation", "inspect_video_window", "refine_video_frames", "find_evidence", "read_source", "read_candidate_fields":
 					answerTools = append(answerTools, t)
 				}
 			}

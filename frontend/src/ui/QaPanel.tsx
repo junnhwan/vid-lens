@@ -214,7 +214,12 @@ export function QaPanel({
           const current = steps.find((step) => step.id === turn.activity.current_step_id) ?? null
           const described = describeTurn(turn, current)
           const isOpen = expanded[turn.turn.id] ?? described.open
-          const answer = turn.turn.answer
+          const preview = !turn.turn.answer && turn.answer_preview
+          const answer = turn.turn.answer ?? turn.answer_preview
+          const answerFrames = preview ? new Map([...frames,...(answer?.frames ?? []).map(frame => [frame.id,frame] as const)]) : frames
+          const displayedAnswer = answer && preview && ["failed","canceled"].includes(turn.turn.status) && answer.evidence
+            ? {...answer,evidence:{...answer.evidence,review:"unavailable",review_reason:turn.turn.status === "canceled" ? "后续核验已停止；已保留的参考解读尚未完成独立核验。" : "本次核验中断；已保留的参考解读尚未完成独立核验。"}}
+            : answer
           const frame = turn.turn.context.frame_id ? frames.get(turn.turn.context.frame_id) : undefined
           return (
             <article className="turn" data-turn-id={turn.turn.id} key={turn.turn.id}>
@@ -257,9 +262,9 @@ export function QaPanel({
                   </div>
                 </div>
               </div>
-              {turn.turn.status === "completed" && answer ? (
+              {answer ? (
                 <>
-                  <AnswerBody answer={answer} frames={frames} onOpenFrame={onOpenFrame} onAskFrame={() => undefined} onCite={onCite} onBroken={onBroken} />
+                  <AnswerBody answer={displayedAnswer!} frames={answerFrames} onOpenFrame={onOpenFrame} onAskFrame={() => undefined} onCite={onCite} onBroken={onBroken} />
                   {Object.values(answer.citations || {})
                     .filter((c) => c.kind === "external_reference")
                     .map((c) => (
@@ -272,12 +277,13 @@ export function QaPanel({
               ) : null}
               {turn.turn.status === "canceled" ? (
                 <div className="turn-answer">
-                  <p className="turn-stopped">没有继续生成回答。</p>
+                  <p className="turn-stopped">{preview ? "已停止后续核验，上方保留的是尚未完成核验的参考解读。" : "没有继续生成回答。"}</p>
                 </div>
               ) : null}
               {turn.turn.status === "failed" ? (
                 <div className="turn-answer">
                   <p className="form-error">{turn.failure?.message || "没能完成回答。"}</p>
+                  {preview ? <p className="quiet-note">上方参考解读已保留，本次核验中断。</p> : null}
                   {turn.failure?.diagnostic_id ? <small className="meta">错误编号：{turn.failure.diagnostic_id}</small> : null}
                 </div>
               ) : null}

@@ -76,7 +76,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     setTurns(page.items); turnsRef.current = page.items
     const loaded = Object.fromEntries(page.items.map(item => [item.turn.id, asSteps(item.activity.recent_steps).map(normalizeStep)]))
     stepsRef.current = loaded; setTurnSteps(loaded)
-    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
+    absorb(page.items.flatMap(item => [...(item.turn.answer?.frames ?? item.answer_preview?.frames ?? []), ...asSteps(item.activity.recent_steps).flatMap(step => step.frames ?? [])]))
     const active = page.items.find(item => !isTerminalStatus(item.turn.status))
     if (active) startStream(active, epoch)
     setFocusToken(value => value + 1)
@@ -121,7 +121,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
       stepsRef.current = updated
       return updated
     })
-    absorb([...(view.turn.answer?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
+    absorb([...(view.turn.answer?.frames ?? view.answer_preview?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
     setConversation((prev) => {
       if (!prev || prev.id !== view.turn.conversation_id) return prev
       const terminal = isTerminalStatus(view.turn.status)
@@ -219,7 +219,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     const loaded: Record<string, ActivityStep[]> = {}
     for (const turn of page.items) {
       loaded[turn.turn.id] = mergeSteps([], asSteps(turn.activity.recent_steps).map(normalizeStep), true)
-      absorb([...(turn.turn.answer?.frames ?? []), ...asSteps(turn.activity.recent_steps).flatMap((step) => step.frames ?? [])])
+      absorb([...(turn.turn.answer?.frames ?? turn.answer_preview?.frames ?? []), ...asSteps(turn.activity.recent_steps).flatMap((step) => step.frames ?? [])])
     }
     stepsRef.current = loaded
     setTurnSteps(loaded)

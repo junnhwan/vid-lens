@@ -162,6 +162,14 @@ html:has(.reading-dialog[open]) { overflow: hidden; }
 .question-message .question-delivery { margin: 8px 0 0; font: 400 12px/1.5 var(--sans); color: var(--ink-soft); }
 .assistant-message, .turn-activity, .pending-turn { min-width: 0; }
 .answer-evidence { margin: 0 0 18px; border-bottom: 1px solid var(--line); font-family: var(--sans); }
+.answer-review { margin: 0 0 18px; padding: 12px 14px; border-left: 2px solid var(--teal); background: var(--teal-soft); border-radius: 0 6px 6px 0; font: 12px/1.7 var(--sans); }
+.answer-review strong { color: var(--teal-ink); }
+.turn-answer .answer-review p { margin: 4px 0 0; color: var(--ink-soft); font: inherit; }
+.answer-review-pending, .answer-review-partial, .answer-review-unavailable { border-left-style: dashed; }
+.answer-uncertainties { margin-top: 24px; padding-top: 14px; border-top: 1px dashed var(--line-strong); font: 13px/1.8 var(--sans); }
+.answer-uncertainties h4 { margin: 0 0 10px; }
+.turn-answer .answer-uncertainties blockquote { margin: 0; padding-left: 12px; border-left: 2px solid var(--line-strong); font: inherit; color: var(--ink-soft); }
+.turn-answer .answer-uncertainties li p { margin: 6px 0 14px; font: inherit; }
 .answer-evidence > summary { padding: 9px 0; color: var(--teal-ink); font-size: 12px; line-height: 1.7; cursor: pointer; }
 .answer-evidence > summary span { color: var(--ink-soft); }
 .answer-evidence-body { padding: 8px 12px 16px; background: var(--teal-soft); border-radius: 6px; margin-bottom: 12px; }

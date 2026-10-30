@@ -532,6 +532,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			var work *domain.WorkError
 			if s.compactQuestionReview() && s.reviewing && errors.Is(err, errEmptyModelResponse) {
 				problem := &domain.Problem{Status: 502, Code: "PROVIDER_UNAVAILABLE", Detail: "独立核验没有返回有效结论，本次回答未发布。可以重新回答。", Meta: map[string]any{"can_retry": true}}
+				if s.limitedQuestionDelivery() {
+					problem.Detail = "独立核验没有返回有效结论，将保留明确标注的有限回答。"
+				}
 				return nil, s.failModelStep(ctx, step, problem)
 			}
 			if errors.As(err, &work) {

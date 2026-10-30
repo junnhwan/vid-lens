@@ -7,6 +7,16 @@ import { ArticleOutline } from "./ArticleOutline"
 const answer: Answer = {kind:"grounded",summary:"隔离限制影响范围，快照减少重建成本。",blocks:[{id:"why",type:"paragraph",origin:"video",content:[{type:"text",text:"权限检查与执行边界解决不同的问题。"}]},{id:"how",type:"paragraph",origin:"video",content:[{type:"text",text:"快照能复用已经准备好的环境状态。"}]},{id:"bound",type:"paragraph",origin:"video",content:[{type:"text",text:"还需考虑状态的一致性。"}]}],parts:[{title:"隔离保护什么",block_ids:["why"]},{title:"快照节省哪一步",block_ids:["how"]}],citations:{},frames:[],limitations:[]}
 const callbacks={frames:new Map(),onOpenFrame:()=>undefined,onAskFrame:()=>undefined,onCite:()=>undefined,onBroken:()=>undefined}
 describe("answer composition and navigation",()=>{
+  it("keeps review status explicit and separates uncertain claims from supported content",()=>{
+    for (const [review,label] of [["pending","参考解读 · 正在独立核验"],["partial","部分内容已核验"],["unavailable","有限回答 · 独立核验未完成"],["passed","已完成独立核验"]]) {
+      const value:Answer={...answer,evidence:{text_sources:[],viewed_frame_ids:[],review,review_reason:"本次核验状态说明",uncertainties:[{claim:"这是否是全片唯一关键图？",reason:"只看了局部画面，无法确认全片排名。"}]},limitations:[{code:"coverage",message:"未检查全片所有画面。",citation_ids:[],section_ids:[]}]}
+      const html=renderToStaticMarkup(<AnswerBody answer={value} {...callbacks}/> )
+      expect(html).toContain(label)
+      expect(html).toContain('aria-label="未确认项"')
+      expect(html).toContain("无法确认全片排名")
+      expect(html).toContain('class="answer-limits" open=""')
+    }
+  })
   it("uses question-specific subtopics without losing ungrouped or legacy blocks",()=>{
     const groups=answerGroups(answer)
     expect(groups.flatMap((group)=>group.blocks.map((block)=>block.id))).toEqual(["why","how","bound"])

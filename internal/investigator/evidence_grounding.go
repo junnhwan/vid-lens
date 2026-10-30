@@ -143,6 +143,23 @@ func (s *session) validateQuestionFrameReference(a domain.Answer) error {
 	if !s.policy().EvidenceGrounding || s.turn == nil || a.Kind != "grounded" || len(s.cp.Inspections["question-context"]) == 0 {
 		return nil
 	}
+	contextFrames := slices.Clone(s.cp.Inspections["question-context"])
+	if s.limitedQuestionDelivery() {
+		// A selected transition frame may be answered by an explicitly traced
+		// nearby sample. Preserve the selected-image obligation for every other
+		// case rather than forcing a decorative citation to the blank original.
+		for range 2 {
+			for key, refinement := range s.cp.FrameRefinements {
+				if slices.ContainsFunc(refinement.ParentIDs, func(id string) bool { return slices.Contains(contextFrames, id) }) {
+					for _, id := range s.cp.Inspections[key] {
+						if !slices.Contains(contextFrames, id) {
+							contextFrames = append(contextFrames, id)
+						}
+					}
+				}
+			}
+		}
+	}
 	used := map[string]bool{}
 	for _, b := range a.Blocks {
 		for _, id := range blockCitationIDs(b) {
@@ -156,7 +173,7 @@ func (s *session) validateQuestionFrameReference(a domain.Answer) error {
 	}
 	for id := range used {
 		c := a.Citations[id]
-		if c.Kind == "video_frame" && slices.Contains(s.cp.Inspections["question-context"], c.FrameID) {
+		if c.Kind == "video_frame" && slices.Contains(contextFrames, c.FrameID) {
 			return nil
 		}
 	}

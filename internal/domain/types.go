@@ -384,9 +384,18 @@ type Answer struct {
 
 // Server-owned provenance of this answer. Older answers have no delivery record.
 type AnswerEvidence struct {
-	TextSources    []AnswerTextSource `json:"text_sources"`
-	ViewedFrameIDs []string           `json:"viewed_frame_ids"`
-	Review         string             `json:"review"`
+	ReviewReason   string              `json:"review_reason,omitempty"`
+	VerifiedBlocks []string            `json:"verified_block_ids,omitempty"`
+	Uncertainties  []AnswerUncertainty `json:"uncertainties,omitempty"`
+	TextSources    []AnswerTextSource  `json:"text_sources"`
+	ViewedFrameIDs []string            `json:"viewed_frame_ids"`
+	Review         string              `json:"review"`
+}
+
+type AnswerUncertainty struct {
+	Claim       string   `json:"claim"`
+	Reason      string   `json:"reason"`
+	CitationIDs []string `json:"citation_ids,omitempty"`
 }
 
 type AnswerTextSource struct {

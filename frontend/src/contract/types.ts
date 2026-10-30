@@ -404,7 +404,7 @@ export interface ArticleResponse {
 export type DetailLevel = "concise" | "standard" | "detailed"
 
 export interface Answer {
-	evidence?: { text_sources: { citation_id: string; text: string }[]; viewed_frame_ids: string[]; review: string }
+  evidence?: { text_sources: { citation_id: string; text: string }[]; viewed_frame_ids: string[]; review: string; review_reason?: string; verified_block_ids?: string[]; uncertainties?: { claim: string; reason: string; citation_ids?: string[] }[] }
   kind: string
   summary: string
   blocks: Block[]
@@ -432,6 +432,7 @@ export interface TurnBody {
 }
 
 export interface TurnView {
+  answer_preview?: Answer
   server_now?: string
   schema_version: number
   turn: TurnBody

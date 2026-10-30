@@ -2,6 +2,7 @@ package testsupport
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 	"vidlens/internal/domain"
@@ -9,8 +10,17 @@ import (
 )
 
 // Question prepares durable, isolated source/article/turn rows without models,
-// media downloads or evaluation videos. Used by external-evidence tests.
+// media downloads or evaluation videos, at the historical interactive adapter
+// used by existing external-evidence fixtures. CurrentQuestion tests admission.
 func Question(t *testing.T, s *store.Store) (domain.Turn, domain.Claim) {
+	return question(t, s, false)
+}
+
+func CurrentQuestion(t *testing.T, s *store.Store) (domain.Turn, domain.Claim) {
+	return question(t, s, true)
+}
+
+func question(t *testing.T, s *store.Store, current bool) (domain.Turn, domain.Claim) {
 	t.Helper()
 	ctx := context.Background()
 	owner, e := s.NewSession(ctx, domain.ID(), time.Hour)
@@ -59,6 +69,20 @@ func Question(t *testing.T, s *store.Store) (domain.Turn, domain.Claim) {
 	turn, e := s.Turn(ctx, owner.ID, con.ID, a.ID)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if !current {
+		var cp map[string]any
+		var raw []byte
+		if e = s.Pool.QueryRow(ctx, "SELECT checkpoint FROM job_runs WHERE id=$1", turn.RunID).Scan(&raw); e != nil {
+			t.Fatal(e)
+		}
+		if e = json.Unmarshal(raw, &cp); e != nil {
+			t.Fatal(e)
+		}
+		cp["execution_contract"] = domain.ExecutionContract{Version: domain.ExecutionContractV9, RunID: turn.RunID}
+		if _, e = s.Pool.Exec(ctx, "UPDATE job_runs SET checkpoint=$2 WHERE id=$1", turn.RunID, domain.JSON(cp)); e != nil {
+			t.Fatal(e)
+		}
 	}
 	c, e = s.Claim(ctx, turn.RunID, 1, "reference-fixture")
 	if e != nil || c == nil {

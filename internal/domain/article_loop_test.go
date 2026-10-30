@@ -14,7 +14,7 @@ func TestArticleWriterDoesNotChooseQuestionAdapter(t *testing.T) {
 		{ArticleLoopV2, false, false, ExecutionContractV9},
 		{ArticleLoopV2, true, false, ExecutionContractV9},
 		{ArticleLoopV2, true, true, ExecutionContractV9},
-		{ExecutionContractV12, true, false, ExecutionContractV12},
+		{ExecutionContractV12, true, false, ExecutionContractV9},
 		{ExecutionContractV10, true, true, ExecutionContractV9},
 		{ExecutionContractV9, false, false, ExecutionContractV9},
 	} {
