@@ -125,6 +125,18 @@ func (s *Store) Check(ctx context.Context, c domain.Claim) error {
 	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error { return fence(ctx, tx, c) })
 }
 func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *domain.Failure) error {
+	if domain.Terminal(r.Status) {
+		return nil
+	}
+	if err := charge(ctx, tx, r.ID); err != nil {
+		return err
+	}
+	return terminateCharged(ctx, tx, r, status, f)
+}
+
+// Fail already charges elapsed time to decide whether retry budget remains.
+// Finish that same transaction without counting the heartbeat interval again.
+func terminateCharged(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *domain.Failure) error {
 	if f != nil && f.DiagnosticID == "" {
 		f.DiagnosticID = "vl_" + r.ID
 	}
@@ -136,9 +148,6 @@ func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *d
 		reason = f.Message
 	}
 	if e := closeSourceSteps(ctx, tx, r, status, reason); e != nil {
-		return e
-	}
-	if e := charge(ctx, tx, r.ID); e != nil {
 		return e
 	}
 	if _, e := tx.Exec(ctx, "UPDATE job_runs SET status=$2,failure=$3,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1", r.ID, status, nullableJSON(f)); e != nil {
@@ -213,7 +222,7 @@ func (s *Store) Fail(ctx context.Context, c domain.Claim, f domain.Failure, tran
 		}
 		retry = transient && r.FailureCount < p.MaxRetries(r.Kind) && r.ActiveMS < p.ActiveBudget(r.Kind).Milliseconds() && time.Now().Add(delay).Before(r.DeadlineAt)
 		if !retry {
-			return terminate(ctx, tx, r, "failed", &f)
+			return terminateCharged(ctx, tx, r, "failed", &f)
 		}
 		if e = closeSourceSteps(ctx, tx, r, "failed", f.Message); e != nil {
 			return e
