@@ -390,6 +390,7 @@ export interface MediaCapability {
 }
 
 export interface ArticleResponse {
+  suggested_questions?: SuggestedQuestionsView
   detail_level?: DetailLevel | ""
   detail_policy_revision?: string
   generation_model?: GenerationModel
@@ -401,10 +402,13 @@ export interface ArticleResponse {
   media: MediaCapability
 }
 
+export interface SuggestedQuestion { question: string; section_id?: string }
+export interface SuggestedQuestionsView { status: "queued" | "running" | "completed" | "incomplete" | "unavailable"; items: SuggestedQuestion[] }
+
 export type DetailLevel = "concise" | "standard" | "detailed"
 
 export interface Answer {
-  evidence?: { text_sources: { citation_id: string; text: string }[]; viewed_frame_ids: string[]; review: string; review_reason?: string; verified_block_ids?: string[]; uncertainties?: { claim: string; reason: string; citation_ids?: string[] }[] }
+  evidence?: { text_sources: { citation_id: string; text: string }[]; viewed_frame_ids: string[]; review: string; review_scope?: string; review_reason?: string; verified_block_ids?: string[]; uncertainties?: { claim: string; reason: string; citation_ids?: string[] }[] }
   kind: string
   summary: string
   blocks: Block[]

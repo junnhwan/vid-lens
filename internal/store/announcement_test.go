@@ -92,6 +92,9 @@ func TestAnnouncementMigrationAppendsAfterPublishedRecommendation(t *testing.T) 
 	if _, e := s.Pool.Exec(ctx, "ALTER TABLE model_probes DROP COLUMN started_at"); e != nil {
 		t.Fatal(e)
 	}
+	if _, e := s.Pool.Exec(ctx, "DROP TABLE article_questions; DROP INDEX qa_conversations_owner_video_order; ALTER TABLE qa_conversations ADD CONSTRAINT qa_conversations_session_id_request_id_key UNIQUE(session_id,request_id)"); e != nil {
+		t.Fatal(e)
+	}
 	if _, e := s.Pool.Exec(ctx, "DROP TABLE IF EXISTS article_reviews; DROP TABLE IF EXISTS site_announcement_entries; DROP TABLE IF EXISTS site_announcement_state; DROP TABLE IF EXISTS site_announcement; DROP TABLE IF EXISTS execution_settings; ALTER TABLE example_showcases DROP COLUMN IF EXISTS process, DROP COLUMN IF EXISTS process_frozen; DROP INDEX IF EXISTS example_question_once; ALTER TABLE storage_settings DROP COLUMN IF EXISTS host_min_free_bytes, DROP COLUMN IF EXISTS source_download_limit_bytes, DROP COLUMN IF EXISTS disk_stop_percent; DELETE FROM schema_migrations WHERE version>18"); e != nil {
 		t.Fatal(e)
 	}

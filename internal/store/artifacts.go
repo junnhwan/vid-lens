@@ -338,6 +338,9 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		if err := queueAutomaticArticleReview(ctx, tx, c.Run.ID, a.ID, c.Run.ConfigID); err != nil {
 			return err
 		}
+		if err := queueArticleQuestions(ctx, tx, c, a.ID); err != nil {
+			return err
+		}
 		return finishRun(ctx, tx, c, a.ID)
 	})
 }

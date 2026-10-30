@@ -78,8 +78,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 30 {
-		t.Fatalf("expected 30 registered migrations, got %v", versions)
+	if len(versions) != 31 {
+		t.Fatalf("expected 31 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -89,7 +89,7 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 }
 
 func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
-	for _, version := range []int{18, 19, 20, 21, 29} {
+	for _, version := range []int{18, 19, 20, 21, 29, 30} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			s := testStore(t)
 			ctx := context.Background()
@@ -168,6 +168,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 			}
 			if version < 30 {
 				if _, err := s.Pool.Exec(ctx, "DROP INDEX qa_conversations_owner_video_order; ALTER TABLE qa_conversations ADD CONSTRAINT qa_conversations_session_id_request_id_key UNIQUE(session_id,request_id)"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if version < 31 {
+				if _, err := s.Pool.Exec(ctx, "DROP TABLE article_questions"); err != nil {
 					t.Fatal(err)
 				}
 			}

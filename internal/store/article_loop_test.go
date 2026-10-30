@@ -22,8 +22,9 @@ func TestArticleLoopAdmissionDefaultsToV2AndKeepsExplicitHistoricalContracts(t *
 	}
 	req, claim := prepared(t, s, owner)
 	var original struct {
-		Contract       domain.ExecutionContract `json:"execution_contract"`
-		DeliveryPolicy string                   `json:"article_delivery_policy"`
+		Contract        domain.ExecutionContract `json:"execution_contract"`
+		DeliveryPolicy  string                   `json:"article_delivery_policy"`
+		QuestionsPolicy string                   `json:"article_questions_policy"`
 	}
 	_ = json.Unmarshal(claim.Run.Checkpoint, &original)
 	if original.Contract.Version != domain.ArticleLoopV2 {
@@ -31,6 +32,9 @@ func TestArticleLoopAdmissionDefaultsToV2AndKeepsExplicitHistoricalContracts(t *
 	}
 	if original.DeliveryPolicy != domain.CurrentArticleDelivery {
 		t.Fatal("new article did not freeze delivery before advice")
+	}
+	if original.QuestionsPolicy != domain.ArticleQuestionsPolicy {
+		t.Fatal("new article did not freeze optional questions preparation")
 	}
 	if _, err := s.Fail(ctx, claim, domain.Failure{Code: "MODEL_RESULT_INVALID", CanRetry: true}, false, 0); err != nil {
 		t.Fatal(err)

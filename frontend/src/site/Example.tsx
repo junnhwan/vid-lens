@@ -98,7 +98,7 @@ export function Example() {
   }, [route.id, published])
   const current = data?.id === route.id ? data : null
   const choice = published.find((item) => item.id === route.id)
-  const questions = useExampleQuestions(current?.id ?? null, current?.article.title, current?.article.sections[0]?.title, current?.article.sections[0]?.id)
+  const questions = useExampleQuestions(current?.id ?? null, current?.article.title, current?.article.sections[0]?.title, current?.article.sections[0]?.id,current?.suggested_questions,current?.article.sections)
   const frames = useMemo(() => {
     const map = new Map((current?.frames || []).map((frame) => [frame.id, frame]))
     for (const frame of questions.frames) map.set(frame.id, frame)
@@ -274,6 +274,8 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
         frameChip={questions.frameChip}
         passageChip={questions.passageChip}
         prompts={questions.prompts}
+        promptStatus={questions.promptStatus}
+        promptSource={questions.promptSource}
         busy={questions.busy}
         error={questions.error}
         expanded={questions.expanded}

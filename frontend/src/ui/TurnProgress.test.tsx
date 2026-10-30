@@ -15,6 +15,16 @@ let renderer: ReactTestRenderer | undefined
 afterEach(async()=>{ await act(async()=>renderer?.unmount());renderer=undefined;vi.unstubAllGlobals();vi.restoreAllMocks() })
 
 describe("question progress",()=>{
+  it("offers saved questions as editable starts without automatically sending",async()=>{
+    vi.stubGlobal("window",{setInterval,clearInterval,matchMedia:()=>({matches:true})})
+    const onSuggest=vi.fn(),onSend=vi.fn()
+    await act(async()=>{renderer=create(createElement(QaPanel,{...panelProps(view()),turns:[],prompts:["什么时候应重开上下文窗口？","研究和规划阶段应分别保留哪些信息？"],promptSource:"generated",promptStatus:"completed",onSuggest,onSend}))})
+    const group=renderer!.root.findByProps({"aria-label":"本视频推荐问题"})
+    await act(async()=>group.findAllByType("button")[0].props.onClick())
+    expect(onSuggest).toHaveBeenCalledWith("什么时候应重开上下文窗口？")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(JSON.stringify(renderer?.toJSON())).toContain("打开会话不会重复生成")
+  })
   it("shows a provisional answer while review is running and replaces it with the final result",async()=>{
     vi.stubGlobal("window",{setInterval,clearInterval,matchMedia:()=>({matches:true})})
     const preview:Answer={kind:"limited",summary:"先看已有依据",blocks:[{id:"p",type:"paragraph",origin:"video",content:[{type:"text",text:"原文支持的参考解释"}]}],citations:{},frames:[],limitations:[],evidence:{review:"pending",review_reason:"独立核验正在进行",text_sources:[],viewed_frame_ids:[]}}

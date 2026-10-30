@@ -8,7 +8,7 @@ const answer: Answer = {kind:"grounded",summary:"隔离限制影响范围，快�
 const callbacks={frames:new Map(),onOpenFrame:()=>undefined,onAskFrame:()=>undefined,onCite:()=>undefined,onBroken:()=>undefined}
 describe("answer composition and navigation",()=>{
   it("keeps review status explicit and separates uncertain claims from supported content",()=>{
-    for (const [review,label] of [["pending","参考解读 · 正在独立核验"],["partial","部分内容已核验"],["unavailable","有限回答 · 独立核验未完成"],["passed","已完成独立核验"]]) {
+    for (const [review,label] of [["pending","参考解读 · 正在独立核验"],["partial","部分内容已核验"],["unavailable","有限回答 · 独立核验未完成"],["passed","所引依据已核验"]]) {
       const value:Answer={...answer,evidence:{text_sources:[],viewed_frame_ids:[],review,review_reason:"本次核验状态说明",uncertainties:[{claim:"这是否是全片唯一关键图？",reason:"只看了局部画面，无法确认全片排名。"}]},limitations:[{code:"coverage",message:"未检查全片所有画面。",citation_ids:[],section_ids:[]}]}
       const html=renderToStaticMarkup(<AnswerBody answer={value} {...callbacks}/> )
       expect(html).toContain(label)

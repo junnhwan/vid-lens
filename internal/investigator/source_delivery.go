@@ -141,5 +141,8 @@ func (s *session) indexedReviewSource(task reviewTask, catalog map[string]domain
 	}
 	out["transcript"] = originals
 	out["text_access"] = "All cited original segments and their chronological neighbors; the complete source index is navigation, not proof. not_assessed is required if the delivered originals cannot establish a material assertion."
+	if s.explicitQuestionScope() {
+		out["visual_comparison_scope"] = map[string]any{"full_video_comparison": false, "delivered_frame_ids": reviewTaskFrames(task), "rule": "Only these sampled/reloaded pixels were compared. A complete article or source index is not exhaustive visual coverage. Claims that a diagram is the entire video's only/unique/most important visual need independent evidence beyond local samples; a parenthetical 'within viewed materials' does not justify a simultaneous whole-video claim. Explicitly attributed speaker claims may be checked against the actual cited original."}
+	}
 	return out, nil
 }

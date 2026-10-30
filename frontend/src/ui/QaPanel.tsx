@@ -26,6 +26,8 @@ export function QaPanel({
   frameChip,
   passageChip,
   prompts,
+  promptStatus,
+  promptSource = "generic",
   busy,
   error,
   expanded,
@@ -68,6 +70,8 @@ export function QaPanel({
   frameChip: { id: string; label: string } | null
   passageChip: { quote: string } | null
   prompts: string[]
+  promptStatus?: string
+  promptSource?: "generated" | "chapters" | "generic"
   busy: boolean
   error: string
   expanded: Record<string, boolean | undefined>
@@ -199,14 +203,17 @@ export function QaPanel({
       >
         {!turns.length && !pendingQuestion ? (
           <div className="qa-empty">
-            <p>可以问文章里的内容，也可以从某张图问起。</p>
-            <div className="qa-prompts">
+            <span className="qa-empty-kicker">{promptSource === "generated" ? "为这条视频准备" : "从这条视频开始"}</span>
+            <p className="qa-empty-title">想深入哪一部分？</p>
+            <p className="qa-empty-hint">{promptSource === "generated" ? "选一个感兴趣的问题，或直接写下你想问的。" : ["queued","running"].includes(promptStatus ?? "") ? "专属问题正在准备，也可以先从章节问起。" : "从感兴趣的章节问起，也可以选中一段文字或画面。"}</p>
+            <div className="qa-prompts" role="group" aria-label={promptSource === "generated" ? "本视频推荐问题" : "选择提问方向"}>
               {prompts.map((prompt) => (
-                <button type="button" key={prompt} onClick={() => onSuggest(prompt)}>
-                  {prompt}
+                <button type="button" key={prompt} disabled={busy} onClick={() => onSuggest(prompt)}>
+                  <span>{prompt}</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 15 15 5M5 5h10v10"/></svg>
                 </button>
               ))}
             </div>
+            <small className="qa-empty-note">{promptSource === "generated" ? "问题已随图文准备，打开会话不会重复生成。" : "点击只会填入输入框，可以编辑后再发送。"}</small>
           </div>
         ) : null}
         {turns.map((turn) => {

@@ -17,17 +17,18 @@ import (
 )
 
 type checkpoint struct {
-	FrameRefinements      map[string]frameRefinement `json:"frame_refinements,omitempty"`
-	QuestionTiming        *config.QuestionTiming     `json:"question_timing,omitempty"`
-	ArticleDeliveryPolicy string                     `json:"article_delivery_policy,omitempty"`
-	ArticleLoopParent     json.RawMessage            `json:"article_loop_parent,omitempty"`
-	ArticleLoop           *articleLoopState          `json:"article_loop,omitempty"`
-	Workflow              *workflowState             `json:"workflow,omitempty"`
-	SourceNotes           []sourceNote               `json:"source_notes,omitempty"`
-	SourceIndexProtocol   string                     `json:"source_index_protocol,omitempty"`
-	SourceChunkDelivered  string                     `json:"source_chunk_delivered,omitempty"`
-	PendingOverview       []string                   `json:"pending_overview,omitempty"`
-	ExecutionContract     *domain.ExecutionContract  `json:"execution_contract,omitempty"`
+	ArticleQuestionsPolicy string                     `json:"article_questions_policy,omitempty"`
+	FrameRefinements       map[string]frameRefinement `json:"frame_refinements,omitempty"`
+	QuestionTiming         *config.QuestionTiming     `json:"question_timing,omitempty"`
+	ArticleDeliveryPolicy  string                     `json:"article_delivery_policy,omitempty"`
+	ArticleLoopParent      json.RawMessage            `json:"article_loop_parent,omitempty"`
+	ArticleLoop            *articleLoopState          `json:"article_loop,omitempty"`
+	Workflow               *workflowState             `json:"workflow,omitempty"`
+	SourceNotes            []sourceNote               `json:"source_notes,omitempty"`
+	SourceIndexProtocol    string                     `json:"source_index_protocol,omitempty"`
+	SourceChunkDelivered   string                     `json:"source_chunk_delivered,omitempty"`
+	PendingOverview        []string                   `json:"pending_overview,omitempty"`
+	ExecutionContract      *domain.ExecutionContract  `json:"execution_contract,omitempty"`
 
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
 	PlanHash             string              `json:"plan_hash,omitempty"`

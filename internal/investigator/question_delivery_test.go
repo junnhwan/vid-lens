@@ -16,6 +16,20 @@ import (
 
 const deliveryV6Fixture = "qa-article-reading-2026-10-30-v6"
 
+func TestQuestionEvidenceNamesItsReviewScope(t *testing.T) {
+	s, _ := deliveryFixture(t, func(http.ResponseWriter, *http.Request) { t.Error("provenance must not call models") })
+	s.cp.ExecutionContract.InputRevision = "qa-article-reading-2026-10-30-v7"
+	a := domain.Answer{Citations: map[string]domain.Citation{}}
+	if err := s.answerEvidence(context.Background(), &a); err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	_ = json.Unmarshal(domain.JSON(a.Evidence), &raw)
+	if raw["review_scope"] != "cited_sources_and_viewed_frames" {
+		t.Fatal("a passed badge did not explain its limited evidence scope", raw)
+	}
+}
+
 func deliveryFixture(t *testing.T, handler http.HandlerFunc) (*session, domain.Article) {
 	s, a := publicationReviewFixture(t, handler)
 	s.cp.ExecutionContract.Version = domain.ExecutionContractV9

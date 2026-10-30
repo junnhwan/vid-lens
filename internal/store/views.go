@@ -165,6 +165,10 @@ func (s *Store) Article(ctx context.Context, session, requestID string) (map[str
 			status = "restoring"
 		}
 		out = map[string]any{"schema_version": 1, "article": a, "frames": frames, "media": map[string]any{"status": status, "can_inspect_now": ready, "can_restore_for_question": true}}
+		out["suggested_questions"], e = articleQuestionsView(ctx, tx, a.ID)
+		if e != nil {
+			return e
+		}
 		m, e := one[domain.GenerationModel](ctx, tx, "SELECT generation_model FROM articles WHERE id=$1", a.ID)
 		if e != nil {
 			return e

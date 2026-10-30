@@ -29,7 +29,7 @@ export function AnswerBody({ answer, ...props }: Props) {
   const evidenceRef = useRef<HTMLDetailsElement>(null)
   useEffect(() => { if (sourceID) evidenceRef.current?.scrollIntoView({ block: "nearest" }) }, [sourceID])
   const evidence = answer.evidence
-  const reviewLabels: Record<string,string> = {pending:"参考解读 · 正在独立核验",passed:"已完成独立核验",partial:"部分内容已核验",unavailable:"有限回答 · 独立核验未完成"}
+  const reviewLabels: Record<string,string> = {pending:"参考解读 · 正在独立核验",passed:"所引依据已核验",partial:"部分内容已核验",unavailable:"有限回答 · 独立核验未完成"}
   const uncertainties = evidence?.uncertainties ?? []
   const sources = evidence?.text_sources ?? []
   const source = sources.find(item => item.citation_id === sourceID) ?? sources[0]
@@ -48,7 +48,7 @@ export function AnswerBody({ answer, ...props }: Props) {
   const firstText = first?.type === "paragraph" ? (first.content ?? []).filter((inline) => inline.type === "text").map((inline) => inline.text ?? "").join("") : ""
   const repeatedLead = !!answer.summary && normalize(answer.summary) === normalize(firstText)
   return <div className="turn-answer">
-    {evidence?.review_reason ? <div className={`answer-review answer-review-${evidence.review}`} role="status"><strong>{reviewLabels[evidence.review] ?? "核验状态未确认"}</strong><p>{evidence.review_reason}</p></div> : null}
+    {evidence?.review_reason ? <div className={`answer-review answer-review-${evidence.review}`} role="status"><strong>{reviewLabels[evidence.review] ?? "核验状态未确认"}</strong><p>{evidence.review_reason}</p>{evidence.review_scope === "cited_sources_and_viewed_frames" ? <p>{evidence.viewed_frame_ids.length ? "核验限于本次引用的原文与已查看画面，不代表逐帧比较了全片。" : "核验限于本次引用的原文，不代表已检查视频画面。"}</p> : null}</div> : null}
     {evidence ? <details ref={evidenceRef} className="answer-evidence" open={evidenceOpen} onToggle={event => setEvidenceOpen(event.currentTarget.open)}>
       <summary>{sources.length ? `依据 ${sources.length} 处视频原文` : "查看回答依据"}<span> · {evidence.viewed_frame_ids.length ? `本轮已查看 ${evidence.viewed_frame_ids.length} 张画面` : "本轮未查看画面"}</span></summary>
       <div className="answer-evidence-body">

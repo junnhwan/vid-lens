@@ -41,6 +41,9 @@ func TestQuestionDeliveryPreviewAndFinalStates(t *testing.T) {
 					return
 				}
 				reviews.Add(1)
+				if !strings.Contains(string(domain.JSON(in.Messages)), "full_video_comparison") {
+					t.Error("reviewer did not receive the host-owned comparison scope")
+				}
 				view, _, err := db.TurnView(context.Background(), owner, turn.ConversationID, turn.ID)
 				if err != nil {
 					t.Error(err)

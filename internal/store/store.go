@@ -324,6 +324,7 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 		cp["execution_contract"] = domain.ExecutionContract{Version: version, RunID: id}
 		if kind == "article.generate" && version == domain.ArticleLoopV2 {
 			cp["article_delivery_policy"] = domain.CurrentArticleDelivery
+			cp["article_questions_policy"] = domain.ArticleQuestionsPolicy
 		}
 	}
 	_, e := tx.Exec(ctx, "INSERT INTO job_runs(id,kind,work_key,source_id,snapshot_id,config_id,status,deadline_at,checkpoint) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8)", id, kind, key, source, snapshot, configID, deadline, domain.JSON(cp))

@@ -1,4 +1,4 @@
-import type { ActivityStep, ExecutionView, RequestView, TurnView } from "../contract/types"
+import type { ActivityStep, ExecutionView, RequestView, TurnView, SuggestedQuestion, Article } from "../contract/types"
 import { clipText, formatRange } from "../contract/text"
 import { isTerminalStatus } from "../contract/stream"
 import { displayStepTitle, parseTranscription } from "./progress"
@@ -20,15 +20,26 @@ function when(iso: string | null | undefined): string {
   return date.toLocaleString("zh-CN", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
-export function starterPrompts(title: string | undefined, sectionTitle: string | undefined): string[] {
+export function starterPrompts(title: string | undefined, sectionTitle: string | undefined, saved?: SuggestedQuestion[]): string[] {
+  if (saved !== undefined) return saved.map(item => item.question)
   const main = title ? `《${title}》主要在讲什么？` : "这条视频主要在讲什么？"
   const focus = sectionTitle ? clipText(sectionTitle, 18) : ""
   const second = focus ? `「${focus}」里最关键的一点是什么？` : "最值得记住的结论是什么？"
   return [main, second, "哪些说法可以直接回到画面核对？"]
 }
 
-export function starterSection(question: string, section: { id: string; title: string } | undefined): { section_id?: string } {
+export function starterSection(question: string, section: { id: string; title: string } | undefined, saved?: SuggestedQuestion[], sections?: Article["sections"]): { section_id?: string } {
+  const prepared = saved?.find(item => item.question === question)
+  if (prepared) return prepared.section_id ? {section_id:prepared.section_id} : {}
+  const chapter = sections?.find(item => chapterQuestion(item.title) === question)
+  if (chapter) return {section_id:chapter.id}
   return section && question === starterPrompts(undefined, section.title)[1] ? { section_id: section.id } : {}
+}
+
+export function chapterQuestion(title:string) { return `请解释「${title}」的核心观点与视频依据。` }
+export function chapterPrompts(sections:Article["sections"] = []) {
+  const picks = sections.length <= 3 ? sections : [sections[0], sections[Math.floor(sections.length/2)],sections.at(-1)!]
+  return picks.filter(item => item.title.trim()).map(item => chapterQuestion(item.title))
 }
 
 export function describeRequest(view: RequestView | null, current: ActivityStep | null, holding: boolean, reconnecting: boolean) {

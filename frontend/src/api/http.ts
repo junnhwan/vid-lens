@@ -6,6 +6,7 @@ import type {
   Accepted,
   ActivityPage,
   ArticleResponse,
+  SuggestedQuestionsView,
   ConversationResponse,
   ConversationPage,
   Frame,
@@ -156,6 +157,8 @@ export class HttpApi {
   article(id: string) {
     return this.request<ArticleResponse>("GET", `/api/v1/requests/${encodeURIComponent(id)}/article`).then((result) => result.body)
   }
+
+  async suggestedQuestions(id:string) { return (await this.request<SuggestedQuestionsView>("GET",`/api/v1/requests/${id}/suggested-questions`)).body }
 
   frame(requestId: string, frameId: string) {
     return this.request<{ schema_version: number; frame: Frame }>(

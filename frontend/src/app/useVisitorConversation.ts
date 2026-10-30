@@ -18,7 +18,8 @@ import type {
   StreamPosition,
   TurnView
 } from "../contract/types"
-import { starterPrompts, starterSection } from "./labels"
+import { starterPrompts, starterSection, chapterPrompts } from "./labels"
+import { useSuggestedQuestions } from "./useSuggestedQuestions"
 import type { PendingQuestion } from "./pendingQuestion"
 import type { VisitorContext } from "./visitorContext"
 import { ObsoleteRequest, isTurnView, normalizeStep } from "./visitorContract"
@@ -31,6 +32,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
   function ownsRequest(gen: number, id: string) { return workspace.ownsRequest(gen, id, context.request()?.request.id) }
 
   const article = context.article(), session = context.session()
+  const requestID=context.request()?.request.id
+  const suggestions=useSuggestedQuestions(article?.article.id,article?.suggested_questions,()=>context.runtime()?.api.suggestedQuestions?.(requestID!) ?? Promise.resolve({status:"unavailable",items:[]}))
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [turns, setTurns] = useState<TurnView[]>([])
   const [turnSteps, setTurnSteps] = useState<Record<string, ActivityStep[]>>({})
@@ -283,7 +286,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
       ),
     [turnSteps, frameMap],
   )
-  const prompts = starterPrompts(article?.article.title, article?.article.sections[0]?.title)
+  const prompts = suggestions?.items.length ? starterPrompts(undefined,undefined,suggestions.items) : chapterPrompts(article?.article.sections)
   const suggesting = prompts[0]
   function reset() {
     selection.current++; composers.current.clear(); history.reset()
@@ -297,6 +300,8 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
     reset, hide: () => setQaOpen(false), turn: (id: string) => turnsRef.current.find(t => t.turn.id === id),
     mergeHistory: (id: string, steps: ActivityStep[]) => setTurnSteps(prev => ({ ...prev, [id]: mergeSteps(prev[id] ?? [], steps, false) })),
     view: {
+      promptStatus:suggestions?.status,
+      promptSource:suggestions?.items.length ? "generated" as const : "chapters" as const,
       turns,
       currentConversation: conversation,
       conversationHistory: history.controls,
@@ -384,7 +389,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
             setQaError("选中文字合计超过了可选长度。")
             return
           }
-          const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, context.article()?.article.sections[0]) }
+          const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, context.article()?.article.sections[0], suggestions?.items,context.article()?.article.sections) }
           restoreSend.current = () => { setDraft(text); setFrameChip(sentFrame); setPassageChip(sentPassage); setExternalAllowed(externalAllowed); setReferenceLinks(referenceLinks) }
           sending.current = true
           setQaBusy(true)

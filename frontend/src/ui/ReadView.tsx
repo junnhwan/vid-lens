@@ -39,6 +39,8 @@ export function ReadView(props: {
   frameChip: { id: string; label: string } | null
   passageChip: PassageChoice | null
   prompts: string[]
+  promptStatus?: string
+  promptSource?: "generated" | "chapters" | "generic"
   qaBusy: boolean
   qaError: string
   expanded: Record<string, boolean | undefined>
@@ -379,6 +381,8 @@ export function ReadView(props: {
             frameChip={props.frameChip}
             passageChip={props.passageChip}
             prompts={props.prompts}
+            promptStatus={props.promptStatus}
+            promptSource={props.promptSource}
             busy={props.qaBusy}
             error={props.qaError}
             expanded={props.expanded}

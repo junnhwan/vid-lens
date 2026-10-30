@@ -108,6 +108,7 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/requests/{request}/cancel", a.cancelRequest)
 	m.HandleFunc("POST /api/v1/requests/{request}/retry", a.retryRequest)
 	m.HandleFunc("GET /api/v1/requests/{request}/article", a.article)
+	m.HandleFunc("GET /api/v1/requests/{request}/suggested-questions", a.articleQuestionSuggestions)
 	m.HandleFunc("GET /api/v1/requests/{request}/draft", a.articleDraft)
 	m.HandleFunc("GET /api/v1/requests/{request}/reviews", a.articleReviews)
 	m.HandleFunc("POST /api/v1/requests/{request}/reviews", a.articleReviews)

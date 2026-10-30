@@ -40,7 +40,7 @@ const data: ExampleData = {
 function questions(open = false): ReturnType<typeof useExampleQuestions> {
   return {
     open, turns: [], currentConversation: null, conversationHistory: {items:[],busy:false,error:"",hasMore:false,refresh:()=>{},more:()=>{},create:()=>{},select:()=>{}}, frames: [], stepsFor: () => [], draft: "", frameChip: null, passageChip: null, prompts: ["这条视频主要在讲什么？"],
-    pendingQuestion: null, restoreQuestion: () => undefined,
+    pendingQuestion: null, restoreQuestion: () => undefined, promptStatus:undefined,promptSource:"chapters",
     busy: false, error: "", expanded: {}, focusToken: 0, externalAllowed: false, externalAvailable: false, searchAvailable: false,
     referenceLinks: "", selectionMax: 1000, setDraft: () => undefined, setExternal: () => undefined, setReferenceLinks: () => undefined,
     askFrame: () => undefined, askPassage: () => undefined, toggle: () => undefined, close: () => undefined, suggest: () => undefined,

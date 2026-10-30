@@ -436,7 +436,7 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	if err = json.Unmarshal(run.Checkpoint, &cp); err != nil {
 		t.Fatal(err)
 	}
-	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.InputRevision != domain.QuestionReadingV6 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
+	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.InputRevision != domain.QuestionReadingV7 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
 		t.Fatal("question did not persist its own execution contract")
 	}
 }

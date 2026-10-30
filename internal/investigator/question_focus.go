@@ -146,6 +146,9 @@ func questionViewedFrames(input frozenModelInput) []string {
 
 func (s *session) answerEvidence(ctx context.Context, a *domain.Answer) error {
 	evidence := &domain.AnswerEvidence{TextSources: []domain.AnswerTextSource{}, ViewedFrameIDs: []string{}, Review: "passed"}
+	if s.explicitQuestionScope() {
+		evidence.ReviewScope = "cited_sources_and_viewed_frames"
+	}
 	byID := map[string]domain.Segment{}
 	for _, segment := range s.transcript {
 		byID[segment.ID] = segment

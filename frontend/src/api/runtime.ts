@@ -15,6 +15,7 @@ import type {
 } from "../contract/types"
 
 export interface VisitorApi {
+  suggestedQuestions?(id: string): Promise<import("../contract/types").SuggestedQuestionsView>
   session(): Promise<SessionResponse>
   createRequest(videoUrl: string, key: string, options?: GenerationInput): Promise<Accepted<RequestView>>
   getRequest(id: string): Promise<RequestView>

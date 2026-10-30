@@ -90,6 +90,25 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.ctx = ctx
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("vidlens.run", w.handle)
+	mux.HandleFunc("article.questions", func(ctx context.Context, t *asynq.Task) error {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(t.Payload(), &body) != nil {
+			return asynq.SkipRetry
+		}
+		q, err := w.Store.ClaimArticleQuestions(ctx, body.ID)
+		if errors.Is(err, store.ErrExecutionBusy) {
+			return errBusy
+		}
+		if err != nil {
+			return err
+		}
+		if q == nil {
+			return nil
+		}
+		return w.Agent.RunArticleQuestions(ctx, *q)
+	})
 	mux.HandleFunc("article.review", func(ctx context.Context, t *asynq.Task) error {
 		var body struct {
 			ID string `json:"id"`
@@ -192,6 +211,11 @@ func (w *Worker) Shutdown() {
 }
 func taskID(id string, generation int64) string { return fmt.Sprintf("vl:%s:%d", id, generation) }
 func (w *Worker) dispatch(ctx context.Context) {
+	if questions, err := w.Store.PendingArticleQuestions(ctx); err == nil {
+		for _, q := range questions {
+			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("article.questions", domain.JSON(map[string]string{"id": q.ArticleID})), asynq.TaskID("questions:"+q.ArticleID), asynq.Queue("reviews"), asynq.MaxRetry(20), asynq.Timeout(store.ArticleQuestionsTimeout+5*time.Second), asynq.Deadline(q.DeadlineAt), asynq.Retention(24*time.Hour))
+		}
+	}
 	if reviews, err := w.Store.PendingArticleReviews(ctx); err == nil {
 		for _, review := range reviews {
 			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("article.review", domain.JSON(map[string]string{"id": review.ID})), asynq.TaskID("review:"+review.ID), asynq.Queue("reviews"), asynq.MaxRetry(120), asynq.Timeout(store.ArticleReviewTimeout+5*time.Second), asynq.Deadline(review.DeadlineAt.Add(store.ArticleReviewTimeout)), asynq.Retention(24*time.Hour))

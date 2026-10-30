@@ -6,17 +6,18 @@ import { canReplay, forgetWrite, newIdempotencyKey, pendingWrite, rememberWrite,
 import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../contract/activity"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, normalizeQuote, passageContext, type PassageChoice } from "../contract/text"
-import type { ActivityStep, Conversation, Frame, SessionResponse, TurnView } from "../contract/types"
-import { starterPrompts, starterSection } from "../app/labels"
+import type { ActivityStep, Conversation, Frame, SessionResponse, TurnView, SuggestedQuestionsView, Article } from "../contract/types"
+import { starterPrompts, starterSection, chapterPrompts } from "../app/labels"
 import type { PendingQuestion } from "../app/pendingQuestion"
 import { errorText, normalizeStep } from "../app/visitorContract"
 import { conversationWithTurns, useConversationHistory } from "../app/useConversationHistory"
+import { useSuggestedQuestions } from "../app/useSuggestedQuestions"
 
 function browserStore(): KeyValue {
   return localStorage
 }
 
-export function useExampleQuestions(articleID: string | null, title: string | undefined, sectionTitle: string | undefined, sectionID?: string) {
+export function useExampleQuestions(articleID: string | null, title: string | undefined, sectionTitle: string | undefined, sectionID?: string, suggestions?: SuggestedQuestionsView, sections?: Article["sections"]) {
   const apiRef = useRef<HttpApi | null>(null)
   const sessionRef = useRef<SessionResponse | null>(null)
   const streamRef = useRef<ResourceStream | null>(null)
@@ -265,6 +266,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   }, [])
 
   const session = sessionRef.current
+  const prepared=useSuggestedQuestions(articleID ?? undefined,suggestions,async()=> (await api().request<{suggested_questions?:SuggestedQuestionsView}>("GET",`/api/v1/examples/${articleID}`)).body.suggested_questions ?? {status:"unavailable",items:[]})
   const external = session?.capabilities.external_sources
   return {
     open,
@@ -276,7 +278,9 @@ export function useExampleQuestions(articleID: string | null, title: string | un
     draft,
     frameChip,
     passageChip,
-    prompts: starterPrompts(title, sectionTitle),
+    prompts: prepared?.items.length ? starterPrompts(undefined,undefined,prepared.items) : sections ? chapterPrompts(sections) : starterPrompts(title,sectionTitle),
+    promptStatus:prepared?.status,
+    promptSource:prepared?.items.length ? "generated" as const : "chapters" as const,
     busy: busy || history.controls.busy,
     pendingQuestion,
     restoreQuestion: () => { if (pendingQuestion?.phase === "failed") { restoreSend.current?.(); setPendingQuestion(null); setFocusToken(value => value + 1) } },
@@ -397,7 +401,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
       setError("")
       const sentFrame = frameChip
       const sentPassage = passageChip
-      const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, sectionID && sectionTitle ? { id: sectionID, title: sectionTitle } : undefined) }
+      const sentContext = { frame_id: sentFrame?.id ?? null, ...passageContext(sentPassage), ...starterSection(text, sectionID && sectionTitle ? { id: sectionID, title: sectionTitle } : undefined,prepared?.items,sections) }
       restoreSend.current = () => { setDraft(text); setFrameChip(sentFrame); setPassageChip(sentPassage); setExternalAllowed(externalAllowed); setReferenceLinks(referenceLinks) }
       setDraft("")
       setPendingQuestion({ question: text, context: sentContext, phase: "sending" })

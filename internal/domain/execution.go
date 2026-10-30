@@ -92,6 +92,7 @@ const QuestionReadingV3 = "qa-article-reading-2026-10-29-v3"
 const QuestionReadingV4 = "qa-article-reading-2026-10-29-v4"
 const QuestionReadingV5 = "qa-article-reading-2026-10-29-v5"
 const QuestionReadingV6 = "qa-article-reading-2026-10-30-v6"
+const QuestionReadingV7 = "qa-article-reading-2026-10-30-v7"
 
 func QuestionReadingContract(version string) bool {
 	return version == QuestionReadingV1 || QuestionSemanticReadingContract(version)
@@ -103,9 +104,9 @@ func QuestionReadingContract(version string) bool {
 // reviewer and records server-owned answer provenance. V5 combines small reviews
 // and conservatively admits actionable feedback. Older inputs stay frozen.
 func QuestionSemanticReadingContract(version string) bool {
-	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4 || version == QuestionReadingV5 || version == QuestionReadingV6
+	return version == QuestionReadingV2 || version == QuestionReadingV3 || version == QuestionReadingV4 || version == QuestionReadingV5 || version == QuestionReadingV6 || version == QuestionReadingV7
 }
 
 func QuestionInputRevision(articleVersion string) string {
-	return QuestionReadingV6
+	return QuestionReadingV7
 }

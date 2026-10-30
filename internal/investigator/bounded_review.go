@@ -285,6 +285,7 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	if s.compactQuestionReview() {
 		instructions = questionEvidenceReviewInstructions + "\n" + reviewCitationBindingInstructions
 	}
+	if s.explicitQuestionScope(){instructions+="\n严格区分局部选图建议与全片排他性结论。visual_comparison_scope是服务器记录的实际范围，不是作者观点。‘全片唯一一处’即使末尾括注‘已查看范围内’，也不能由两张局部截图支持；未有完整对比或明确归因原文时，对该具体断言返回unverifiable并指出局部证据限制。‘只标了X’也不能掩盖同图实际存在的其他相关标注。不要因此否定其余有依据的图注和解释。"}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")
 	if err != nil {

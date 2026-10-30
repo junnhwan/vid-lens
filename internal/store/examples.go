@@ -57,18 +57,19 @@ type PublicExampleQuestion struct {
 }
 
 type PublicExample struct {
-	ID              string                  `json:"id"`
-	SchemaVersion   int                     `json:"schema_version"`
-	DetailLevel     string                  `json:"detail_level,omitempty"`
-	Article         domain.Article          `json:"article"`
-	Frames          []domain.Frame          `json:"frames"`
-	Media           publicExampleMedia      `json:"media"`
-	GenerationModel *domain.GenerationModel `json:"generation_model,omitempty"`
-	Purpose         string                  `json:"purpose,omitempty"`
-	QAAvailable     bool                    `json:"qa_available"`
-	ProcessStatus   string                  `json:"process_status"`
-	GenerationSteps []domain.Step           `json:"generation_steps"`
-	Questions       []PublicExampleQuestion `json:"questions"`
+	SuggestedQuestions map[string]any          `json:"suggested_questions,omitempty"`
+	ID                 string                  `json:"id"`
+	SchemaVersion      int                     `json:"schema_version"`
+	DetailLevel        string                  `json:"detail_level,omitempty"`
+	Article            domain.Article          `json:"article"`
+	Frames             []domain.Frame          `json:"frames"`
+	Media              publicExampleMedia      `json:"media"`
+	GenerationModel    *domain.GenerationModel `json:"generation_model,omitempty"`
+	Purpose            string                  `json:"purpose,omitempty"`
+	QAAvailable        bool                    `json:"qa_available"`
+	ProcessStatus      string                  `json:"process_status"`
+	GenerationSteps    []domain.Step           `json:"generation_steps"`
+	Questions          []PublicExampleQuestion `json:"questions"`
 }
 
 type exampleProcess struct {
@@ -297,6 +298,10 @@ func (s *Store) PublicExample(ctx context.Context, id string) (PublicExample, er
 			Media:           publicExampleMedia{Status: status, CanInspectNow: ready, CanRestoreForQuestion: true},
 			GenerationModel: model, Purpose: strings.TrimSpace(row.Purpose), QAAvailable: qaReady,
 			ProcessStatus: process.Status, GenerationSteps: process.Steps, Questions: []PublicExampleQuestion{},
+		}
+		out.SuggestedQuestions, err = articleQuestionsView(ctx, tx, id)
+		if err != nil {
+			return err
 		}
 		return nil
 	})

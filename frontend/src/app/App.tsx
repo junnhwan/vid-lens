@@ -281,6 +281,8 @@ export function App() {
               frameChip={visitor.frameChip}
               passageChip={visitor.passageChip}
               prompts={visitor.prompts}
+              promptStatus={visitor.promptStatus}
+              promptSource={visitor.promptSource}
               qaBusy={visitor.qaBusy}
               qaError={visitor.qaError}
               expanded={visitor.expanded}

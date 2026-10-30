@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest"
 import type { ActivityStep, RequestView } from "../contract/types"
-import { describeRequest, stepPresentation, starterPrompts } from "./labels"
+import { describeRequest, stepPresentation, starterPrompts, starterSection, chapterPrompts } from "./labels"
 
 describe("terminal activity", () => {
+  it("uses saved video-specific questions instead of fixed title templates", () => {
+    expect(starterPrompts("复杂代码库", "开场", [{question:"什么时候应重开上下文窗口？",section_id:"reset"}])).toEqual(["什么时候应重开上下文窗口？"])
+  })
+  it("binds saved questions and chapter starts to their actual sections",()=>{
+    const question={question:"什么时候应重开上下文窗口？",section_id:"reset"}
+    expect(starterSection(question.question,undefined,[question])).toEqual({section_id:"reset"})
+    const sections=[{id:"research",title:"研究阶段",blocks:[]},{id:"reset",title:"重开上下文",blocks:[]}]
+    const prompts=chapterPrompts(sections)
+    expect(starterSection(prompts[1],undefined,[],sections)).toEqual({section_id:"reset"})
+    expect(starterPrompts("旧文章","旧开场",[])).toEqual([])
+  })
   const step = { status: "running" } as ActivityStep
 
   it("stops presenting unfinished work as active after failure", () => {

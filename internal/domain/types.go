@@ -384,6 +384,7 @@ type Answer struct {
 
 // Server-owned provenance of this answer. Older answers have no delivery record.
 type AnswerEvidence struct {
+	ReviewScope    string              `json:"review_scope,omitempty"`
 	ReviewReason   string              `json:"review_reason,omitempty"`
 	VerifiedBlocks []string            `json:"verified_block_ids,omitempty"`
 	Uncertainties  []AnswerUncertainty `json:"uncertainties,omitempty"`

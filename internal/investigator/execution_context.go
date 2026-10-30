@@ -100,6 +100,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 			instruction = strings.ReplaceAll(instruction, "无待观察图或关键阻塞且本问必要事实齐备时", "本问必要依据足够时")
 			instruction = strings.ReplaceAll(instruction, "提交不等于批准：程序校验来源、像素与正文，独立核验通过后才展示。", "提交不等于批准：程序先校验来源、像素与正文，并展示明确标为核验中的参考解读；独立核验支持的内容正式交付，未确认或有冲突的说法单列，核验服务无结果时仍交付标注状态的有限回答。")
 			instruction += questionDeliveryInstructions
+			if s.explicitQuestionScope() {
+				instruction += "\n结论只给一句局部建议，如‘在已查看材料中，建议先看这张图’；不要再加‘全片唯一/唯一一处’等超范围排名，即使末尾括注‘已查看范围内’也不成立。图注用一两句交代图意，不逐字抄整张图的标注；选图理由与图注分工，不重复数字清单。"
+			}
 		}
 		if s.focusedQuestion() {
 			instruction += questionFocusInstructions
