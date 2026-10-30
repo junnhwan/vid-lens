@@ -440,7 +440,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if e != nil {
 			return e
 		}
-		run, e := newRun(ctx, tx, "qa.answer", id, source.SourceID, configID, &c.SnapshotID, time.Now().Add(time.Duration(p.AnswerSeconds)*time.Second))
+		run, e := newRun(ctx, tx, "qa.answer", id, source.SourceID, configID, &c.SnapshotID, time.Now().Add(time.Duration(config.NewQuestionTiming().WallSeconds)*time.Second))
 		var workflowArticle bool
 		var articleContract string
 		if e == nil {

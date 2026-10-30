@@ -7,8 +7,8 @@ import type { PassageChoice } from "../contract/text"
 import type { TurnView } from "../contract/types"
 import { useExampleQuestions } from "./useExampleQuestions"
 
-const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), retryTurn: vi.fn(), getConversation:vi.fn(), conversations:vi.fn(),createConversation:vi.fn() }))
-vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn; retryTurn = api.retryTurn;getConversation=api.getConversation;conversations=api.conversations;createConversation=api.createConversation } }))
+const api = vi.hoisted(() => ({ session: vi.fn(), exampleConversation: vi.fn(), turns: vi.fn(), createTurn: vi.fn(), retryTurn: vi.fn(), cancelTurn:vi.fn(), getConversation:vi.fn(), conversations:vi.fn(),createConversation:vi.fn() }))
+vi.mock("../api/http", () => ({ HttpApi: class { session = api.session; exampleConversation = api.exampleConversation; turns = api.turns; createTurn = api.createTurn; retryTurn = api.retryTurn;cancelTurn=api.cancelTurn;getConversation=api.getConversation;conversations=api.conversations;createConversation=api.createConversation } }))
 let view: ReturnType<typeof useExampleQuestions>
 let renderer: ReactTestRenderer | undefined
 function Questions() { view = useExampleQuestions("article", "文章", "章节", "chapter-id"); return null }
@@ -30,6 +30,22 @@ afterEach(async () => {
 })
 
 describe("public example passage questions", () => {
+  it("deduplicates stop and ignores a cancellation error after leaving the example", async()=>{
+    vi.stubGlobal("location",{origin:"http://example.test"})
+    vi.stubGlobal("EventSource",class {readyState=1;onerror=null;addEventListener(){}close(){}})
+    const active:TurnView={schema_version:1,execution:null,failure:null,turn:{id:"active",conversation_id:"conversation",request_id:"request",article_id:"article",snapshot_id:"snapshot",revision:1,turn_no:1,status:"running",question:"问题",context:{frame_id:null,passage:null},retry_of_id:null,answer:null,created_at:"",updated_at:""},actions:{can_retry:false,can_cancel:true,can_submit_next:false},activity:{recent_steps:[],current_step_id:null,has_more:false,history_url:"",history_status:"none",history_expires_at:null},stream:{cursor:"active-1",revision:1,run_id:"run",seq:1}}
+    api.exampleConversation.mockResolvedValue({conversation:{id:"conversation",article_id:"article",last_turn_id:"active",active_turn_id:"active"}})
+    api.turns.mockResolvedValue({items:[active]})
+    let reject!:(reason:Error)=>void
+    api.cancelTurn.mockReturnValue(new Promise((_resolve,fail)=>{reject=fail}))
+    await act(async()=>{renderer=create(createElement(Questions))})
+    await act(async()=>view.toggle())
+    await act(async()=>{void view.stop();void view.stop()})
+    expect(api.cancelTurn).toHaveBeenCalledTimes(1)
+    await act(async()=>renderer?.unmount())
+    await act(async()=>reject(new Error("late stop error")))
+    expect(view.error).toBe("")
+  })
   it("keeps separate drafts when creating and switching example conversations", async () => {
     const first={id:"first",request_id:"request",article_id:"article",snapshot_id:"snapshot",last_turn_id:null,active_turn_id:null,created_at:"2026-10-30T00:00:00Z"}
     const second={...first,id:"second"}

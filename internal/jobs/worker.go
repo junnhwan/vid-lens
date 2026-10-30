@@ -220,7 +220,7 @@ func (w *Worker) dispatch(ctx context.Context) {
 			_ = w.Store.OutboxResult(ctx, o, true)
 			continue
 		}
-		p, e := w.Store.Profile(ctx, r.ConfigID)
+		p, e := w.Store.RunProfile(ctx, r)
 		if e != nil {
 			continue
 		}
@@ -261,7 +261,7 @@ func (w *Worker) handle(ctx context.Context, t *asynq.Task) error {
 		}
 		return e
 	}
-	profile, e := w.Store.Profile(ctx, c.Run.ConfigID)
+	profile, e := w.Store.RunProfile(ctx, c.Run)
 	if e != nil {
 		return e
 	}
@@ -324,6 +324,9 @@ func (w *Worker) handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 	f, temporary, after := classify(e)
+	if c.Run.Kind == "qa.answer" && f.Code == "TASK_DEADLINE_EXCEEDED" {
+		f.Message = "本轮问答已达到等待时限，尚未取得完整结果。可以重新回答。"
+	}
 	delay := 15 * time.Second
 	if c.Run.Kind == "qa.answer" || c.Run.Kind == "source.restore" {
 		delay = 5 * time.Second

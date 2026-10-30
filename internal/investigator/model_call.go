@@ -186,15 +186,20 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return nil, &domain.WorkError{Code: "MODEL_OUTPUT_TRUNCATED", Message: "模型输出达到长度上限，未产生完整结果。"}
 		}
 	}
-	if s.articleLoop() {
+	if s.articleLoop() || s.turn != nil && s.cp.QuestionTiming != nil {
 		limited, err := s.engine.Store.ModelCallBudgetExhausted(ctx, s.claim.Run.ID, key)
 		if err != nil {
 			return nil, err
 		}
 		if limited {
+			if s.turn != nil {
+				return nil, questionCallTimeLimit()
+			}
 			return nil, &domain.WorkError{Code: "MODEL_CALL_BUDGET_EXHAUSTED", Message: "冻结调用的总时长预算已用尽，未完成结果保留为未知，不重新发送。"}
 		}
-		limited, err = s.engine.Store.ModelResponseBudgetExhausted(ctx, s.claim.Run.ID, key)
+	}
+	if s.articleLoop() {
+		limited, err := s.engine.Store.ModelResponseBudgetExhausted(ctx, s.claim.Run.ID, key)
 		if err != nil {
 			return nil, err
 		}
@@ -340,6 +345,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return nil, err
 		}
 		limits := s.responseLimits()
+		var progress *modelProgressEmitter
+		if s.turn != nil {
+			progress = s.progressEmitter(actx, &step, limits)
+		}
 		submission := 0
 		var transport *domain.Step
 		observer := newUsageObserver(s.cp.LayoutVersion, p.CachePolicy, func(report usageReport) {
@@ -352,6 +361,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		observer.report.ResponsePolicy = responsePolicy
 		var submitErr error
 		sub := context.WithValue(actx, usageKey{}, observer)
+		if progress != nil {
+			sub = context.WithValue(sub, modelProgressKey{}, progress)
+		}
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
 			if s.stagedWorkflow() || s.articleLoop() {
 				stats, err := s.engine.Store.ModelExecution(actx, s.claim.Run.ID)
@@ -392,6 +404,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				submitErr = err
 			}
 			if err == nil {
+				if progress != nil {
+					progress.startedAt = time.Now()
+					progress.observe("waiting", progress.startedAt)
+				}
 				x := domain.Step{ID: step.ID + "_send_" + strconv.Itoa(submission), Kind: "model_submission", ModelCall: step.ModelCall, Submission: submission, Title: "模型调用 " + strconv.Itoa(step.ModelCall) + " · 发送 " + strconv.Itoa(submission), Phase: step.Phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
 				if s.articleCall != nil {
 					x.FrameIDs = append(x.FrameIDs, s.articleCall.Frames...)
@@ -519,6 +535,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				return nil, s.failModelStep(ctx, step, problem)
 			}
 			if errors.As(err, &work) {
+				if s.turn != nil && work.Code == "MODEL_CALL_BUDGET_EXHAUSTED" {
+					return nil, s.failModelStep(ctx, step, questionCallTimeLimit())
+				}
 				if work.Code != "PROVIDER_UNAVAILABLE" && work.Code != "PROVIDER_RATE_LIMITED" {
 					return nil, s.failModelStep(ctx, step, work)
 				}

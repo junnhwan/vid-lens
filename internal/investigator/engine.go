@@ -53,6 +53,11 @@ type session struct {
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
+	var timingErr error
+	p, timingErr = p.ForRun(c.Run.Kind, c.Run.Checkpoint)
+	if timingErr != nil {
+		return timingErr
+	}
 	s := &session{engine: e, claim: c, profile: p}
 	if c.Run.SnapshotID == nil {
 		return errors.New("run has no snapshot")

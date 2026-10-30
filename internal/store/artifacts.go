@@ -387,6 +387,10 @@ func (s *Store) WaitForRestore(ctx context.Context, c domain.Claim) error {
 		if e != nil {
 			return e
 		}
+		p, e = p.ForRun(r.Kind, r.Checkpoint)
+		if e != nil {
+			return e
+		}
 		deadline := r.CreatedAt.Add(time.Duration(p.RestoreAnswerSeconds) * time.Second)
 		var dep string
 		e = tx.QueryRow(ctx, "SELECT id FROM job_runs WHERE kind='source.restore' AND work_key=$1 AND status IN ('queued','running','retry_wait')", *r.SnapshotID).Scan(&dep)

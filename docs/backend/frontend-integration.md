@@ -28,6 +28,10 @@ Q&A retry uses the same synchronous write guard as sending. Only the latest retr
 
 Successful single model submissions stay in the main activity row with elapsed time and usage. Show the nested send ledger only for multiple sends or a failed/unknown submission. Omit generic successful model receipt messages; actual tool activities, evidence frames and failure messages remain visible. Process history represents recorded actions and outcomes, not private model reasoning.
 
+An active Q&A `model_response` step may include `model_progress`: `{state, observed_at, elapsed_ms, call_limit_ms}`. States are `waiting` (send admitted), `thinking` (actual reasoning activity received), or `responding` (actual content/tool-response activity received). The server emits the send/first-activity receipts immediately and subsequent receipts at most once every five seconds. These receipts contain no reasoning text, answer draft or provider payload; a thinking receipt does not approve an answer. They do not add model calls or submissions. `call_limit_ms` is clipped to the run's remaining execution deadline.
+
+Show the current stage and wall-clock waiting time even when process details are collapsed. Anchor elapsed time and receipt freshness to server/receipt timestamps, advancing with a monotonic client clock. After 15 seconds without a new receipt, describe the last known activity and wait for further response rather than claiming fresh thinking. Keep cancellation available during model thinking and independent review. A pending stop is shown immediately and disables duplicate clicks; keep it visible through `cancel_requested` until the terminal snapshot. Ignore a stop response/error from another conversation or departed page, and preserve the next draft.
+
 ## SSE
 
 The backend batches persistent-state polling per active resource. It emits `view.snapshot` for state/binding changes and can use `activity.upsert` for a consecutive step-only change. A current snapshot may skip covered increments, as permitted by v1; it always carries the current revision/run/seq. No answer tokens, drafts, Base64 images, raw model events or private reasoning are streamed.

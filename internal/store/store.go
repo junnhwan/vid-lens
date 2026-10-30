@@ -169,6 +169,13 @@ func (s *Store) Bootstrap(ctx context.Context, p config.Profile, modelKey, asrKe
 func (s *Store) Profile(ctx context.Context, id string) (config.Profile, error) {
 	return one[config.Profile](ctx, s.Pool, "SELECT profile FROM runtime_config_revisions WHERE id=$1", id)
 }
+func (s *Store) RunProfile(ctx context.Context, r domain.Run) (config.Profile, error) {
+	p, err := s.Profile(ctx, r.ConfigID)
+	if err != nil {
+		return p, err
+	}
+	return p.ForRun(r.Kind, r.Checkpoint)
+}
 func (s *Store) CurrentConfig(ctx context.Context) (string, config.Profile, error) {
 	var id string
 	e := s.Pool.QueryRow(ctx, "SELECT config_id FROM runtime_settings").Scan(&id)
@@ -299,6 +306,9 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 	}
 	id := domain.ID()
 	cp := map[string]any{"schema_version": 1}
+	if kind == "qa.answer" {
+		cp["question_timing"] = config.NewQuestionTiming()
+	}
 	if kind == "article.generate" || kind == "qa.answer" {
 		version := domain.CurrentExecutionContract
 		if kind == "article.generate" {

@@ -40,6 +40,10 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 		if e != nil {
 			return e
 		}
+		p, e = p.ForRun(r.Kind, r.Checkpoint)
+		if e != nil {
+			return e
+		}
 		queueLimit := p.QueueSeconds
 		if r.Kind == "qa.answer" {
 			queueLimit = p.AnswerQueueSeconds
@@ -220,6 +224,10 @@ func (s *Store) Fail(ctx context.Context, c domain.Claim, f domain.Failure, tran
 		if e != nil {
 			return e
 		}
+		p, e = p.ForRun(r.Kind, r.Checkpoint)
+		if e != nil {
+			return e
+		}
 		retry = transient && r.FailureCount < p.MaxRetries(r.Kind) && r.ActiveMS < p.ActiveBudget(r.Kind).Milliseconds() && time.Now().Add(delay).Before(r.DeadlineAt)
 		if !retry {
 			return terminateCharged(ctx, tx, r, "failed", &f)
@@ -388,6 +396,10 @@ func (s *Store) Repair(ctx context.Context, id string, generation int64, broker 
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "TASK_DEADLINE_EXCEEDED", Message: "处理已达到总时限。", CanRetry: true})
 		}
 		p, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", r.ConfigID)
+		if e != nil {
+			return e
+		}
+		p, e = p.ForRun(r.Kind, r.Checkpoint)
 		if e != nil {
 			return e
 		}

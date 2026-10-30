@@ -213,6 +213,10 @@ html:has(.reading-dialog[open]) { overflow: hidden; }
 .turn-answer[data-arrive="true"] .answer-lead { animation: quiet-in 220ms var(--ease-out) both; }
 .turn-answer[data-arrive="true"] .answer-content { animation: quiet-in 260ms var(--ease-out) 90ms both; }
 .turn-q { text-wrap: pretty; }
+.turn-progress { margin: 4px 0 18px; padding: 10px 0 10px 12px; border-left: 2px solid var(--teal-ink); }
+.turn-progress-title { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.6; }
+.turn-progress-detail, .turn-progress-clock { margin: 5px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.7; }
+.turn-progress-clock { font-variant-numeric: tabular-nums; }
 
 .qa-thread-bar { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 0; padding: 10px 0 12px; border-bottom: 1px solid var(--line); }
 .qa-thread-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 12px; }

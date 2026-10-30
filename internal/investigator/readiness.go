@@ -151,6 +151,9 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 			return nil, err
 		}
 		reserve := max(time.Minute, 2*time.Duration(stats.ResponseMS/int64(max(1, stats.Submissions)))*time.Millisecond)
+		if s.cp.QuestionTiming != nil && s.cp.QuestionTiming.Valid() {
+			reserve = max(reserve, time.Duration(s.cp.QuestionTiming.ReviewCallSeconds)*time.Second)
+		}
 		out["remaining_active_ms"] = remaining.Milliseconds()
 		out["submission_and_review_time_reserve_ms"] = reserve.Milliseconds()
 		if len(pending) == 0 && len(blockers) == 0 && reviewIssue == nil && s.requiredRepairTool() == "" {

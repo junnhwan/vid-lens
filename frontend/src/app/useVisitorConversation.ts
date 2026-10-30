@@ -48,6 +48,7 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
   const [qaError, setQaError] = useState("")
   const [qaBusy, setQaBusy] = useState(false)
   const sending = useRef(false)
+  const canceling = useRef(new Set<string>())
   const restoreSend = useRef<(() => void) | null>(null)
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null)
   const conversationLoad = useRef<{ id: string; epoch: number; promise: Promise<Conversation> } | null>(null)
@@ -450,11 +451,12 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
           }
         })(),
       stopTurn: () =>
-        void (async () => {
+        (async () => {
           const rt = context.runtime()
           const current = conversationRef.current
           const active = turnsRef.current.find((turn) => turn.actions.can_cancel)
-          if (!rt || !current || !active) return
+          if (!rt || !current || !active || canceling.current.has(active.turn.id)) return
+          canceling.current.add(active.turn.id)
           const gen = workspace.epoch
           const id = current.request_id
           try {
@@ -466,8 +468,10 @@ export function useVisitorConversation(context: VisitorContext, frameMap: Map<st
 
             }
           } catch (error) {
-            if (!ownsRequest(gen, id)) return
+            if (!ownsRequest(gen, id) || conversationRef.current?.id !== current.id) return
             await report(error, setQaError)
+          } finally {
+            canceling.current.delete(active.turn.id)
           }
         })(),
       retryTurn: (turn: TurnView) =>

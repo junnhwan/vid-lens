@@ -12,10 +12,12 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"vidlens/internal/config"
 	"vidlens/internal/domain"
 )
 
 type checkpoint struct {
+	QuestionTiming        *config.QuestionTiming    `json:"question_timing,omitempty"`
 	ArticleDeliveryPolicy string                    `json:"article_delivery_policy,omitempty"`
 	ArticleLoopParent     json.RawMessage           `json:"article_loop_parent,omitempty"`
 	ArticleLoop           *articleLoopState         `json:"article_loop,omitempty"`

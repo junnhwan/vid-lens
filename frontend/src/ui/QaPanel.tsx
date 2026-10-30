@@ -8,6 +8,7 @@ import { ReferenceCard } from "./ReferenceCard"
 import { prefersReduced } from "./motion"
 import type { PendingQuestion } from "../app/pendingQuestion"
 import { ConversationSwitcher } from "./ConversationSwitcher"
+import { TurnProgress } from "./TurnProgress"
 import type { Conversation } from "../contract/types"
 import type { ConversationHistoryControls } from "../app/useConversationHistory"
 
@@ -73,7 +74,7 @@ export function QaPanel({
   focusToken: number
   onDraft: (value: string) => void
   onSend: () => void
-  onStop: () => void
+  onStop: () => void | Promise<void>
   onRetry: (turn: TurnView) => void
   onClose: () => void
   onToggle: (id: string, open: boolean) => void
@@ -103,6 +104,17 @@ export function QaPanel({
   const [newAnswer, setNewAnswer] = useState(false)
   const previousStatus = useRef(new Map<string, string>())
   const active = turns.find((turn) => !["completed", "failed", "canceled"].includes(turn.turn.status))
+  const [stoppingID, setStoppingID] = useState<string | null>(null)
+  const stoppingRef = useRef<string | null>(null)
+  useEffect(() => { stoppingRef.current = null; setStoppingID(null) }, [active?.turn.id])
+  async function stopAnswer() {
+    if (!active?.actions.can_cancel || stoppingRef.current) return
+    const id = active.turn.id
+    stoppingRef.current = id; setStoppingID(id)
+    try { await onStop() } finally {
+      if (stoppingRef.current === id) { stoppingRef.current = null; setStoppingID(null) }
+    }
+  }
   useEffect(() => { nearBottom.current = true; setNewAnswer(false); previousStatus.current.clear() }, [currentConversation?.id])
 
   useEffect(() => {
@@ -125,7 +137,9 @@ export function QaPanel({
   useLayoutEffect(() => {
     for (const turn of turns) {
       const before = previousStatus.current.get(turn.turn.id)
-      if (before && before !== "completed" && turn.turn.status === "completed" && !prefersReduced()) {
+      const arrived = before && before !== "completed" && turn.turn.status === "completed"
+      if (arrived && !nearBottom.current) setNewAnswer(true)
+      if (arrived && !prefersReduced()) {
         const node = Array.from(sectionRef.current?.querySelectorAll<HTMLElement>(".turn") || [])
           .find((el) => el.dataset.turnId === turn.turn.id)
           ?.querySelector<HTMLElement>(".turn-answer")
@@ -142,7 +156,7 @@ export function QaPanel({
     if (nearBottom.current) {
       log.scrollTop = log.scrollHeight
       setNewAnswer(false)
-    } else if (turns.length) setNewAnswer(true)
+    }
   }, [turns, open, pendingQuestion])
 
   return (
@@ -224,6 +238,7 @@ export function QaPanel({
               </div>
               <div className="assistant-message" aria-label="VidLens 的回答">
               <div className="message-byline assistant-byline"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="10" r="6"/><path d="m15.5 14.5 5 5M4 21h10"/></svg><strong>VidLens</strong><span>视频问答</span></div>
+              <TurnProgress view={turn} current={current} stopping={stoppingID === turn.turn.id} />
               <div className="turn-activity">
                 <button
                   type="button"
@@ -391,8 +406,8 @@ export function QaPanel({
               />
             </svg>
           </button>
-          <button type="button" className="send stop-send" hidden={!active?.actions.can_cancel} onClick={onStop}>
-            停止
+          <button type="button" className="send stop-send" hidden={!active} disabled={!active?.actions.can_cancel || stoppingID === active?.turn.id} onClick={() => void stopAnswer()}>
+            {active?.turn.status === "cancel_requested" || stoppingID === active?.turn.id ? "正在停止…" : "停止回答"}
           </button>
         </div>
       </form>

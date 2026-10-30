@@ -78,6 +78,18 @@ afterEach(async () => {
 
 describe("visitor request ownership", () => {
 
+  it("sends one stop request and ignores its late error after leaving the conversation", async () => {
+    api.turns.mockResolvedValue({items:[turn("A","running")]})
+    const pending=deferred<TurnView>()
+    api.cancelTurn.mockReturnValue(pending.promise)
+    await open("A");await act(async()=>view.toggleQa())
+    await act(async()=>{void view.stopTurn();void view.stopTurn()})
+    expect(api.cancelTurn).toHaveBeenCalledTimes(1)
+    await open("B")
+    await act(async()=>pending.reject(new NetworkError()))
+    expect(view.qaError).toBe("")
+  })
+
   it("replays an uncertain conversation creation key instead of creating another thread", async () => {
     const second={...conversation("A"),id:"second-A"}
     api.createConversation.mockRejectedValueOnce(new NetworkError()).mockResolvedValueOnce({body:{conversation:second}})

@@ -138,6 +138,7 @@ export interface TokenUsage {
 }
 
 export interface ActivityStep {
+  model_progress?: { state: "waiting" | "thinking" | "responding"; observed_at: string; elapsed_ms: number; call_limit_ms: number } | null
   kind?: string
   model_call?: number
   submission?: number

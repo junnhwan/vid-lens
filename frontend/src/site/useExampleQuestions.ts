@@ -37,6 +37,7 @@ export function useExampleQuestions(articleID: string | null, title: string | un
   const [referenceLinks, setReferenceLinks] = useState("")
   const [busy, setBusy] = useState(false)
   const sending = useRef(false)
+  const canceling = useRef(new Set<string>())
   const restoreSend = useRef<(() => void) | null>(null)
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null)
   const conversationLoad = useRef<{ epoch: number; promise: Promise<Conversation | null> } | null>(null)
@@ -333,11 +334,20 @@ export function useExampleQuestions(articleID: string | null, title: string | un
         setTurnSteps((prev) => ({ ...prev, [id]: mergeSteps(prev[id] ?? [], page.items.map(normalizeStep), true) }))
       }).catch((cause: unknown) => setError(errorText(cause)))
     },
-    stop: () => {
+    stop: async () => {
       const current = conversationRef.current
       const active = turnsRef.current.find((turn) => turn.actions.can_cancel)
-      if (!current || !active) return
-      void api().cancelTurn(current.id, active.turn.id).then((view) => installTurn(view, true)).catch((cause: unknown) => setError(errorText(cause)))
+      if (!current || !active || canceling.current.has(active.turn.id)) return
+      const epoch = generation.current
+      canceling.current.add(active.turn.id)
+      try {
+        const view = await api().cancelTurn(current.id, active.turn.id)
+        if (epoch === generation.current && conversationRef.current?.id === current.id) installTurn(view, true)
+      } catch (cause: unknown) {
+        if (epoch === generation.current && conversationRef.current?.id === current.id) setError(errorText(cause))
+      } finally {
+        canceling.current.delete(active.turn.id)
+      }
     },
     retry: (turn: TurnView) => {
       const current = conversationRef.current

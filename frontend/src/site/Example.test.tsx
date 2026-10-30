@@ -44,7 +44,7 @@ function questions(open = false): ReturnType<typeof useExampleQuestions> {
     busy: false, error: "", expanded: {}, focusToken: 0, externalAllowed: false, externalAvailable: false, searchAvailable: false,
     referenceLinks: "", selectionMax: 1000, setDraft: () => undefined, setExternal: () => undefined, setReferenceLinks: () => undefined,
     askFrame: () => undefined, askPassage: () => undefined, toggle: () => undefined, close: () => undefined, suggest: () => undefined,
-    removeFrame: () => undefined, removePassage: () => undefined, toggleTurn: () => undefined, stop: () => undefined, retry: () => undefined, send: () => undefined,
+    removeFrame: () => undefined, removePassage: () => undefined, toggleTurn: () => undefined, stop: async () => undefined, retry: () => undefined, send: () => undefined,
   }
 }
 

@@ -158,6 +158,9 @@ func (e *Engine) baseModel(ctx context.Context, p config.Profile) (model.ToolCal
 }
 func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed ...string) (model.ToolCallingChatModel, error) {
 	var options []outbound.CredentialOptions
+	if policy, ok := ctx.Value(responsePolicyKey{}).(*modelResponsePolicy); ok && policy.valid() && policy.Revision == questionStreamProgressPolicy {
+		options = append(options, outbound.CredentialOptions{ResponseHeaderTimeout: time.Duration(policy.FirstMS) * time.Millisecond})
+	}
 	if capability, _ := ctx.Value(capabilityCheckKey{}).(bool); capability && reasoningGPT(p.ModelName) {
 		// Non-streaming reasoning checks return headers only after generation.
 		// Their wait must use the probe deadline rather than the streaming default.
@@ -390,14 +393,22 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 				}
 			}
 		}
-		meaningful := chunk.Content != "" || chunk.ReasoningContent != ""
+		responding := chunk.Content != ""
 		for _, tc := range chunk.ToolCalls {
-			meaningful = meaningful || tc.Function.Name != "" || tc.Function.Arguments != ""
+			responding = responding || tc.Function.Name != "" || tc.Function.Arguments != ""
 		}
+		thinking := chunk.ReasoningContent != ""
 		if v, ok := chunk.Extra["reasoning-content"].(string); ok && v != "" {
-			meaningful = true
+			thinking = true
 		}
-		if meaningful {
+		if responding || thinking {
+			if progress, ok := call.Value(modelProgressKey{}).(*modelProgressEmitter); ok {
+				state := "responding"
+				if !responding {
+					state = "thinking"
+				}
+				progress.observe(state, time.Now())
+			}
 			hadActivity = true
 			first.Stop()
 			if idle == nil {

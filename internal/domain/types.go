@@ -211,6 +211,7 @@ type Usage struct {
 	Output int64 `json:"output"`
 }
 type Step struct {
+	ModelProgress *ModelProgress `json:"model_progress,omitempty"`
 	Kind          string         `json:"kind,omitempty"`
 	ModelCall     int            `json:"model_call,omitempty"`
 	Submission    int            `json:"submission,omitempty"`
@@ -232,6 +233,15 @@ type Step struct {
 	RetryOfStepID *string        `json:"retry_of_step_id"`
 	StartedAt     *time.Time     `json:"started_at"`
 	FinishedAt    *time.Time     `json:"finished_at"`
+}
+
+// A receipt of stream activity, never the provider's reasoning text. The
+// timestamp lets clients distinguish fresh activity from a quiet connection.
+type ModelProgress struct {
+	State       string    `json:"state"`
+	ObservedAt  time.Time `json:"observed_at"`
+	ElapsedMS   int64     `json:"elapsed_ms"`
+	CallLimitMS int64     `json:"call_limit_ms"`
 }
 
 type PlanItem struct {
