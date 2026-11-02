@@ -111,7 +111,7 @@ VidLens 面向桌面浏览器，把 B 站或 YouTube 视频整理成带章节、
 
 ## 文档
 
-[使用指南](docs/site/index.md) · [隐私与保留](docs/site/privacy.md) · [Agent 执行与恢复](docs/backend/execution.md)
+[使用指南](docs/site/index.md) · [隐私与保留](docs/site/privacy.md) · [Agent 执行与恢复](docs/backend/execution.md) · [AI 工程问题与取舍](docs/backend/ai-engineering-notes.md)
 
 ## 社区与反馈
 

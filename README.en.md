@@ -110,7 +110,7 @@ Requires Go 1.26+, Node.js 22+, PostgreSQL 17, Redis 7, and FFmpeg. The backend 
 
 ## Documentation
 
-[User guide](docs/site/index.md) · [Privacy and retention](docs/site/privacy.md) · [Agent execution and recovery](docs/backend/execution.md)
+[User guide](docs/site/index.md) · [Privacy and retention](docs/site/privacy.md) · [Agent execution and recovery](docs/backend/execution.md) · [AI engineering decisions (Chinese)](docs/backend/ai-engineering-notes.md)
 
 ## Community and feedback
 
